@@ -5,3 +5,4 @@
 *xcms_feature_table_long_c18.csv filter=lfs diff=lfs merge=lfs -text
 *pairwise_sample_comparisons/allcomps_pairwise_thru_network.csv filter=lfs diff=lfs merge=lfs -text
 *c18_comp_feat_pcid_mzrt_rtwindow.csv filter=lfs diff=lfs merge=lfs -text
+*allcomps_pairwise_thru_network.csv filter=lfs diff=lfs merge=lfs -text
