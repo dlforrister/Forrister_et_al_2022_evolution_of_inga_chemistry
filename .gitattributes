@@ -6,3 +6,4 @@
 *pairwise_sample_comparisons/allcomps_pairwise_thru_network.csv filter=lfs diff=lfs merge=lfs -text
 *c18_comp_feat_pcid_mzrt_rtwindow.csv filter=lfs diff=lfs merge=lfs -text
 *allcomps_pairwise_thru_network.csv filter=lfs diff=lfs merge=lfs -text
+*.csv filter=lfs diff=lfs merge=lfs -text

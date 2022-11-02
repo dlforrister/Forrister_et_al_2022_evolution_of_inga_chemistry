@@ -1,12 +1,3 @@
-compound,mz,rt,ion_type
-phenylalanine[M-H],164.0717,3.71,M-H
-tryptophan[M-H],203.0826,3.85,M-H
-methionine[M-H],148.0438,4.32,M-H
-valine[M-H],116.0717,4.61,M-H
-threonine[M-H],118.0510,5.93,M-H
-glutamine[M-H],145.0619,6.52,M-H
-asparagine[M-H],131.0462,6.69,M-H
-glutamic acid[M-H],146.0459,7.05,M-H
-aspartic acid[M-H],132.0302,7.71,M-H
-histidine[M-H],154.0622,8.51,M-H
-arginine[M-H],173.1044,8.58,M-H
+version https://git-lfs.github.com/spec/v1
+oid sha256:0ec499419a551bec0ff4b7ad7831fc6b5378c0329b12dc519984b311303de05d
+size 398
