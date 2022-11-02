@@ -1,0 +1,173 @@
+---
+title: "Figure_1_Compound_Classes_Network"
+author: "Dale Forrister"
+date: "11/24/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+if (!require(here)) install.packages('here')
+library(here)
+if (!require(tidyr)) install.packages('tidyr')
+library(tidyr)
+if (!require(ggplot2)) install.packages('ggplot2')
+library(ggplot2)
+here::here()
+```
+Next, we load in chemistry dataset. These include:
+
+1) sampsByCompounds = matrix contain expression of each compound in each sample. 
+2) pairwise.comps.all = pairwise matrix with cosine similarities between compounds. This is produced by GNPS.
+3) pairwise.comps.all_dist = Same thing but converted to distance matrix (1-similarity)
+4) phy_code is a key for linking sample names to the phylogeny tip names. 
+
+```{r}
+source(here("./code/0_matching_sampsBycomps_and_pairwise.R"))
+sampsByCompounds_pres_abs <- (sampsByCompounds>0)*1
+```
+Next we read in compound annotation data derived from NMR knowns, Spectral Library Matching and Network Annotation Propogation.We filter out compounds that do not appear in the final list of compounds present in our focal species. 
+```{r}
+compound_classes_training <- read.csv(here("./data/0_compound_classes_by_type_training.csv"))
+compound_classes_training_filled <- compound_classes_training[compound_classes_training$cluster.index %in% names(sampsByCompounds),]
+
+```
+Next, we load in machine learning predictions. 
+
+```{r}
+all_predictions <- read.csv(here("./data/1_compound_classes_by_type_machine_learning_predictions.csv")) 
+
+all_predictions_long <- all_predictions[,c("cluster.index","class","pred_bin")]
+
+all_predictions_wide <- spread(all_predictions_long, class, pred_bin, fill = NA)
+all_predictions_wide$Cinamic_Acid_Deriv <- 0
+all_predictions_wide$Flavones <- 0
+all_predictions_wide$Flavanol_Monomers <- 0
+all_predictions_wide$Other <- 0
+
+saps <- read.csv(here("./data/2_Cluster_index_by_saponans_V4_11_17.csv"))
+names(saps)[2] <- "Saponin_Derived"
+saps <- saps[!saps$cluster.index %in% compound_classes_training$cluster.index,]
+
+all_predictions_wide_saps <- merge(all_predictions_wide,saps,by="cluster.index",all=T)
+
+training_prediction_saps_filled <- all_predictions_wide_saps[all_predictions_wide_saps$cluster.index %in% names(sampsByCompounds),]
+training_prediction_saps_filled<- training_prediction_saps_filled[order(training_prediction_saps_filled$cluster.index),]
+training_prediction_saps_filled[is.na(training_prediction_saps_filled)] <- 0
+
+training_prediction_saps_filled$Unkown <- (rowSums(training_prediction_saps_filled[,3:ncol(training_prediction_saps_filled)]) == 0)*1
+training_prediction_saps_filled$Type <- "ML_Prediction"
+
+training_prediction_saps_filled <-training_prediction_saps_filled[,c(1,11,2:7,9,8,10)]
+
+compound_classes_training_filled$Unkown <- 0
+training_prediction_saps_filled$Type[training_prediction_saps_filled$Unkown == 1] <- "No_Annotation"
+all_filled_comps_annotations <- rbind(compound_classes_training_filled,training_prediction_saps_filled)
+
+
+all_filled_comps_annotations[1:10,1:10]
+```
+Generate Figure 1B) Bargraph indicating the frequency of each annotation type used in the analysis.
+
+```{r}
+hits_type <- data.frame(table(all_filled_comps_annotations$Type))
+names(hits_type) <- c("Source","Count")
+
+hits_type <- hits_type[order(hits_type$Count,decreasing = T),]
+hits_type$Source <- factor(hits_type$Source, levels = hits_type$Source)
+
+hits_type$Per <- round(hits_type$Count/sum(hits_type$Count)*100,3)
+  
+library(ggplot2)
+#, position=position_dodge()
+Panel_A_annotation_types <- ggplot(data=hits_type, aes(x=Source, y=Per)) +
+geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +geom_text(aes(label=Count), position=position_dodge(width=0.9), vjust=-0.25) + theme_bw() 
+
+Panel_A_annotation_types
+#hits_type$Per
+#We annotated 41% of compounds
+
+ggsave(Panel_A_annotation_types,path = here("./results/"),filename = "Figure_1B_Annoation_Types.pdf",dpi = 600,width = 12,height = 12)
+
+```
+Generate Figure 1C, Bargraph with the abundance of each compound class type.
+```{r}
+class_counts <- data.frame(compound_class = names(colSums(all_filled_comps_annotations[,3:ncol(all_filled_comps_annotations)])), count = colSums(all_filled_comps_annotations[,3:ncol(all_filled_comps_annotations)]))
+
+class_counts_annotated <- class_counts
+
+#Convert into percent of all annotated compounds
+class_counts_annotated$Per <- round(class_counts_annotated$count/sum(class_counts_annotated$count)*100,3)
+
+class_counts_annotated <- class_counts_annotated[class_counts_annotated$compound_class != "Unkown",]
+
+class_counts_annotated <- class_counts_annotated[order(class_counts_annotated$count,decreasing = T),]
+class_counts_annotated$compound_class <- factor(class_counts_annotated$compound_class,levels = unique(class_counts_annotated$compound_class))
+
+
+library(ggplot2)
+
+Panel_B_comp_classes <- ggplot(data=class_counts_annotated, aes(x=compound_class, y=Per)) +
+geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + theme_bw() + geom_text(aes(label=count), position=position_dodge(width=0.9), vjust=-0.25)#+ scale_fill_manual(values=cbbPalette)
+
+Panel_B_comp_classes
+
+ggsave(Panel_B_comp_classes,path = here("./results/"),filename = "Figure_1C_comp_class_frequency.pdf",dpi = 600,width = 12,height = 12)
+
+```
+Finally, generate network files required for building the compound network in Cytoscape.
+```{r}
+###
+compound_network <- read.delim(file = here("./data/3_Combined_polar_C18_Evolution_of_Inga_chemistry_V9_2020_May_1_selfloop")),header=TRUE, sep="\t")
+
+names(compound_network) <- c("NODE1","NODE2","DeltaMZ","V4","Cosine","OtherScore","V7","GNPS_output")
+
+compound_network <- compound_network[compound_network$NODE1 %in% names(sampsByCompounds) & compound_network$NODE2 %in% names(sampsByCompounds),]
+
+nodes = unique(c(compound_network$NODE1,compound_network$NODE2))
+
+#set the cosine cutoff for visualization
+cosine_cutoff <- 0.75
+
+compound_network$Cosine <- as.numeric(as.character(compound_network$Cosine))
+visualization_network <- compound_network[compound_network$Cosine >= cosine_cutoff,]
+
+visualization_network <- visualization_network[,c("NODE1","NODE2","DeltaMZ","V4","Cosine","OtherScore","V7")]
+names(visualization_network) <- c("NODE1","NODE2","DeltaMZ","V4","Cosine","OtherScore","V7")
+
+#Make sure all compounds have self loops, meaning that a compound has a cosine of 1 with itself. 
+removed_comps <- setdiff(names(sampsByCompounds), unique(c(visualization_network$NODE1, visualization_network$NODE2)))
+if(length(removed_comps)>0){
+  self_loops <- data.frame(t(sapply(removed_comps, function(x) c(x, x, 0, 1, 1, 1, -1))))
+  names(self_loops) <- c("NODE1","NODE2","DeltaMZ","V4","Cosine","OtherScore","V7")
+  self_loops$GNPS_output <- NULL
+  visualization_network_1 <- rbind(visualization_network, self_loops)
+} else {visualization_network_1 <- visualization_network}
+
+
+nodes = unique(c(visualization_network_1$NODE1,visualization_network_1$NODE2))
+
+#build attribute file for network visualisation
+
+colMax <- function(data) sapply(data, max, na.rm = TRUE)
+
+#generate attribute file which contains the metadata assocaited with each compound. 
+compound_abundance_info <- data.frame(cluster.index = names(sampsByCompounds), total_TIC = colSums(sampsByCompounds), max_TIC = colMax(sampsByCompounds), nsamps = colSums((sampsByCompounds>0)*1))
+
+visualization_network_1_attribute <- merge(compound_abundance_info,all_filled_comps_annotations,by="cluster.index",all.x=T)
+visualization_network_2_attribute <- visualization_network_1_attribute[,1:5]
+visualization_network_2_attribute$comp_class <- "Unknown"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Saponin_Derived == 1] <- "Saponin_Derived"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Quinic_Acids_Deriv == 1] <- "Quinic_Acids_Deriv"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Cinamic_Acid_Deriv == 1] <- "Cinamic_Acid_Deriv"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Flavones == 1] <- "Flavones"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Flavanol_Monomers == 1] <- "Flavanol_Monomers"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Flavan3ol_Monomers == 1] <- "Flavan3ol_Monomers"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Flavan3ol_Dimers == 1] <- "Flavan3ol_Dimers"
+visualization_network_2_attribute$comp_class[visualization_network_1_attribute$Other == 1] <- "Other"
+
+write.table(visualization_network_1, here("./results/Figure_1A_Combined_C18_Amid_Anchors_Knowns_Filled_Comps_11_25_cutoff_75_network.tsv"), sep = "\t", row.names=FALSE,
+quote=FALSE)
+
+write.table(visualization_network_2_attribute, here("./results/Figure_1A_Combined_C18_Amid_Anchors_Knowns_Filled_Comps_11_25_cutoff_75_attribute.tsv"), sep = "\t", row.names=FALSE,
+quote=FALSE)
+

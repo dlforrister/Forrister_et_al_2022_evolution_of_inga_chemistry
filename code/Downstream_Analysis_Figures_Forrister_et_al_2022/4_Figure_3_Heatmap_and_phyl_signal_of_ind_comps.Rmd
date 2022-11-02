@@ -1,0 +1,239 @@
+---
+title: "Figure 3 phylogenetic signal and heatmap of individual compounds"
+author: "Dale Forrister"
+date: "2/03/2021"
+output: html_document
+---
+
+```{r setup, echo=FALSE}
+if (!require(here)) install.packages('here')
+library(here)
+if (!require(ape)) install.packages('ape')
+library(ape)
+if (!require(phangorn)) install.packages('phangorn')
+library(phangorn)
+if (!require(nlme)) install.packages('nlme')
+library(nlme)
+if (!require(geiger)) install.packages('geiger')
+library(geiger)
+if (!require(phytools)) install.packages('phytools')
+library(phytools)
+if (!require(data.table)) install.packages('data.table')
+library(data.table)
+if (!require(RMySQL)) install.packages('RMySQL')
+library(RMySQL)
+if (!require(ggplot2)) install.packages('ggplot2')
+library(ggplot2)
+if (!require(ggpubr)) install.packages('ggpubr')
+library(ggpubr)
+
+here::here()
+
+```
+First read in phylogeny.
+
+This is a species level phylogney meaning all accessions collected at multiple sites have been combined into a single tip for all sites. 
+
+We have 98 species in the phylogeny and it has to be rooted with the Zygia outgroup
+
+```{r}
+inga.tree_rooted <-read.tree(here("data","Inga_Astralconstrained_datedTreePL_sptree_FINAL_Match_Utl.tre"))
+
+
+plot(inga.tree_rooted,no.margin=T,edge.width=2,cex = 0.5, align.tip.label= T)
+
+```
+
+Next, we load in chemistry dataset. These include:
+
+1) sampsByCompounds = matrix contain expression of each compound in each sample. 
+2) pairwise.comps.all = pairwise matrix with cosine similarities between compounds. This is produced by GNPS.
+3) pairwise.comps.all_dist = Same thing but converted to distance matrix (1-similarity)
+4) phy_code is a key for linking sample names to the phylogeny tip names. 
+
+```{r,echo=FALSE}
+source(here("./code/0_matching_sampsBycomps_and_pairwise.R"))
+sampsByCompounds_pres_abs <- (sampsByCompounds>0)*1
+
+row.names(sampsByCompounds_pres_abs)
+
+```
+
+For each compound we estimated the ancestral state (0,1) at each internal node in the phylogeny using the make.simapp function in the phytools package. See "./code/2_Apendix_1_Generate_Null_model.." for details. 
+
+From this process we get a dataframe estimating the the number of transitions and the phylogenetic signal for each compound. This code takes a while to run so we provide the output in: "./results/Ancestral_State_comp_rates.csv"
+
+
+ 
+```{r}
+comp_rates <- read.csv(here("./results/Ancestral_State_comp_rates.csv"))
+
+#only look at compounds within the 95% confidence interval of presence and absence
+
+comp_rates_conf_int <- comp_rates[comp_rates$npres <32,]
+
+comp_rates_conf_int
+
+plot(comp_rates$phyl_sig_D~comp_rates$npres,col = as.character(c("grey","red")[(comp_rates$phyl_sig_D_pval_brown<=0.05)+1]))
+
+comp_rates$phyl_sig_D_sig <- comp_rates$phyl_sig_D_pval_brown<=0.05
+
+summary(glm(phyl_sig_D_sig ~ npres, family = binomial(link = "logit"), comp_rates))
+
+plot(comp_rates_conf_int$phyl_sig_D~comp_rates_conf_int$npres,col = as.character(c("grey","red")[(comp_rates_conf_int$phyl_sig_D_pval_brown<=0.05)+1]))
+
+comp_rates_conf_int$phyl_sig_D_sig <- comp_rates_conf_int$phyl_sig_D_pval_brown<=0.05
+
+summary(glm(phyl_sig_D_sig ~ npres, family = binomial(link = "logit"), comp_rates_conf_int))
+
+library(plyr)
+dfSummary <- ddply(comp_rates_conf_int, c("npres"), summarise, 
+                   sig=sum(phyl_sig_D_sig==TRUE), non=sum(phyl_sig_D_sig==FALSE),total=length(phyl_sig_D_sig))
+
+
+
+
+family = binomial
+
+dfSummary <- ddply(comp_rates, c("npres"), summarise, 
+                   sig=sum(phyl_sig_D_sig==TRUE), non=sum(phyl_sig_D_sig==FALSE),total=length(phyl_sig_D_sig))
+
+plot((dfSummary$sig/dfSummary$total)~dfSummary$npres) 
+summary(glm((sig/total) ~ npres, family = binomial, dfSummary))
+
+
+
+
+plot(dfSummary$sig/dfSummary$total~dfSummary$npres)
+
+plot((dfSummary$sig/dfSummary$total)~dfSummary$npres)
+
+summary(glm((sig/total) ~ npres, family = binomial(link = "logit"), dfSummary))
+
+```
+Figure 3A Barplot of Phylogenetic signal.
+
+For visualization purposes we took a representative sample of 500 out of 5,00 compounds, though we are confident that pattern observed for the sample holds for the enitre set of compounds. 
+
+```{r}
+phyl_sig_comp_comps_ordered <- comp_rates_conf_int[order(comp_rates_conf_int$phyl_sig_D,decreasing = F),]
+
+com_comps <- phyl_sig_comp_comps_ordered[phyl_sig_comp_comps_ordered$npres>2,]
+
+#Take a random sample for visualization
+com_comps <- com_comps[sample(1:nrow(com_comps),500,replace = F),]
+com_comps_ord <- com_comps[order(com_comps$phyl_sig_D,decreasing = F),]
+com_comps_list_sig <- com_comps$compound[(com_comps$compound %in% com_comps_ord$compound) & com_comps$phyl_sig_D_pval_brown < 0.05]
+length(com_comps_ord$compound)
+length(com_comps_list_sig)
+ord_comps <- sampsByCompounds_pres_abs[,as.character(com_comps_ord$compound)]
+
+
+ord_comps[,as.character(com_comps_list_sig)] <- ord_comps[,as.character(com_comps_list_sig)]*2
+
+barplot_DF <- data.frame(order = 1:length(com_comps_ord$compound), D = com_comps_ord$phyl_sig_D, sig = as.character(c("grey","red")[(com_comps_ord$compound %in% com_comps_list_sig+1)]))
+
+
+p_blomb_k <- ggbarplot(barplot_DF, x = "order", y = "D",
+          fill = "sig",               # change fill color by cyl
+          color = "sig",            # Set bar border colors to white
+          sort.by.groups = FALSE,     # Don't sort inside each group
+          x.text.angle = 90           # Rotate vertically x axis texts
+          ) + ylab("Phylogenetic Signal \n (Fritz and Purvis D Statistic)") + theme(legend.title = element_blank(),axis.title.x=element_blank(),
+        axis.text.x=element_blank(),legend.position = "none",axis.ticks.x=element_blank())  + scale_fill_manual(values = c("red" = "red", "grey" = "grey")) + scale_color_manual(values = c("red" = "red", "grey" = "grey"))  
+
+#+  geom_hline(aes(yintercept=1), colour="#990000", linetype="dashed") 
+hist(com_comps$phyl_sig_D)
+
+#47 % of compounds show significant phylogenetic signal
+table(com_comps$phyl_sig_D_pval_brown<0.05)/sum(table(com_comps$phyl_sig_D_pval_brown<0.05))
+
+
+#ggsave(p_blomb_k,path = here("./results/"),filename = "Figure_3A_Phylogenetic_Signal_barplot.pdf",dpi = 600,width = 18,height = 4)
+p_blomb_k
+
+```
+Generate heatpmap with comound expression mapped on the phylogeny, ordered by decreasing phylogenetic distance. Columns align with the Figure 3A barplot. 
+
+```{r}
+dev.new()
+tiff(here("./results/Figure_3B_heatplot_ind_comps.tiff"), units="in", width=18, height=12, res=600)
+
+phylo.heatmap(inga.tree_rooted, ord_comps, fsize=0.01, standardize=F,labels=F,legend=F,split=c(0.4,.6),colors = c("white","grey","red"))
+
+dev.off()
+
+phylo.heatmap(inga.tree_rooted, ord_comps, fsize=0.01, standardize=F,labels=F,legend=F,split=c(0.4,.6),colors = c("white","grey","red"))
+
+```
+
+Figure 3 C: Lability index for compound transistions
+
+Based on the ancestral state reconstruction of each compound, we created an index of evolutionary lability, calculated as the number of times a given compound was gained or lost divided by the number of species where a compound is present. Low values for this index indicate strong phylogenetic signal, where a compound evolved few times and was retained within a given lineage. Values near or above 1 indicate that a compound is evolutionarily labile, having been gained or lost frequently across the phylogenetic tree
+
+```{r}
+com_comps$rel_trans <- com_comps$tot_trans/com_comps$npres
+
+
+
+#com_comps$rel_trans_categories <- cut(com_comps$rel_trans, breaks= list(0,0.25,0.5,0.75,1,1.25,1.5,1.75,2),labels =list("[0 to 0.24]","[0.25 to 0.49]","[0.50 to 0.74]","[0.75 to 0.99]","[1.0 to 1.24]","[1.25 to 1.49]","[1.50 to 1.74]","[1.75 to 1.99]"))
+
+#com_comps$rel_trans_categories <- cut(com_comps$rel_trans, breaks= list(0,0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2),labels =list("[0 to 0.19]","[0.20 to 0.39]","[0.40 to 0.59]","[0.6 to .79]","[0.8 to 0.99]","[1.0 to 1.19]","[1.20 to 1.39]","[1.40 to 1.59]","[1.60 to 1.79]","[1.8 to 2.0]"))
+
+com_comps$rel_trans_categories <- cut(com_comps$rel_trans, breaks= list(0,0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2),labels =list("0.2","0.4","0.6","0.8","1.0","1.2","1.4","1.6","1.8","2.0"))
+
+rel_transition_freq <- as.data.frame(table(com_comps$rel_trans_categories))
+names(rel_transition_freq) <- c("breaks","freq")
+
+trans_barplot <- ggbarplot(rel_transition_freq, x = "breaks", y = "freq",
+          fill = "grey",               # change fill color by cyl
+          color = "black",            # Set bar border colors to white
+          palette = "jco",            # jco journal color palett. see ?ggpar
+          #sort.val = "asc",          # Sort the value in dscending order
+          sort.by.groups = FALSE,     # Don't sort inside each group
+          #x.text.angle = 90,         # Rotate vertically x axis texts
+          width = 1
+          ) + xlab("Ratio Number of Compound Tranitions/Frequency of Compound") + ylab("Frequency") + theme(legend.title = element_blank())
+
+trans_barplot
+
+ggsave(trans_barplot,path = here("./results/"),filename = "Figure_3C_Lability_idex.pdf",dpi = 600,width = 12,height = 12)
+
+table(com_comps$rel_trans >= 1)/nrow(com_comps)
+
+```
+Here we illistrate three examples with low and high lability to demonstrate what the index measures. 
+```{R}
+library(ggtree)
+library(ggstance)
+p <- ggtree(inga.tree_rooted) 
+
+comp_rates_conf_int[comp_rates_conf_int$rel_trans_categories == "0.4",]
+
+ind_comp <- sampsByCompounds_pres_abs[,which(colnames(sampsByCompounds_pres_abs) == "36")]
+
+d1 <- data.frame(id = names(ind_comp), value = ind_comp)
+
+p2 <- facet_plot(p, panel= "Low \n 0.27", data=d1, geom= geom_barh, aes(x= value), color='black',fill = 'Black',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) 
+
+comp_rates_conf_int[comp_rates_conf_int$rel_trans_categories == "1.0",]
+
+ind_comp_med <- sampsByCompounds_pres_abs[,which(colnames(sampsByCompounds_pres_abs) == "84")]
+
+d2 <- data.frame(id = names(ind_comp_med), value = ind_comp_med)
+
+
+p3 <- facet_plot(p2, panel= "Median \n 0.9 ", data=d2, geom= geom_barh, aes(x= value), color='black',fill = 'Black',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15))
+
+comp_rates_conf_int[comp_rates_conf_int$rel_trans_categories == "1.4",]
+
+ind_comp_high <- sampsByCompounds_pres_abs[,which(colnames(sampsByCompounds_pres_abs) == "1612")]
+
+d3 <- data.frame(id = names(ind_comp_high), value = ind_comp_high)
+
+p4 <- facet_plot(p2, panel= "High \n 1.26", data=d3, geom= geom_barh, aes(x= value), color='black',fill = 'Black',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15))
+
+p4
+```
+
+

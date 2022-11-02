@@ -1,0 +1,603 @@
+---
+title: "6_Figure_5_Chemical_Similarty_Comparisons"
+author: "Dale Forrister"
+date: "2/3/2021"
+output: html_document
+---
+```{r setup, include=FALSE}
+if (!require(here)) install.packages('here')
+library(here)
+if (!require(ape)) install.packages('ape')
+library(ape)
+if (!require(phangorn)) install.packages('phangorn')
+library(phangorn)
+if (!require(nlme)) install.packages('nlme')
+library(nlme)
+if (!require(geiger)) install.packages('geiger')
+library(geiger)
+if (!require(phytools)) install.packages('phytools')
+library(phytools)
+if (!require(data.table)) install.packages('data.table')
+library(data.table)
+
+if (!require(tidyr)) install.packages('tidyr')
+library(tidyr)
+if (!require(splitstackshape)) install.packages('splitstackshape')
+library(splitstackshape)
+if (!require(ggplot2)) install.packages('ggplot2')
+library(ggplot2)
+if (!require(mgcv)) install.packages('mgcv')
+library(mgcv)
+
+
+if (!require(ggstance)) install.packages('ggstance')
+library(ggstance)
+if (!require(ggtree)) install.packages('ggtree')
+library(ggtree)
+
+
+here::here()
+
+```
+First read in phylogeny.
+
+This is a species level phylogney meaning all accessions collected at multiple sites have been combined into a single tip for all sites. 
+
+We have 98 species in the phylogeny and it has to be rooted with the Zygia outgroup
+
+```{r}
+
+inga.tree_rooted <-read.tree(here("data","Inga_Astralconstrained_datedTreePL_sptree_FINAL_Match_Utl.tre"))
+
+phy_code <- read.csv(here("./data/species_code_name_species_2020_8_25.csv"))
+phy_code$Species_Code[which(phy_code$Species_Code == "M27b")] <- "M27"
+
+#convert the phylogney into a pairwise phyl distance.
+pairwise_phyl_distance <- data.frame(t(combn(names(as.data.frame(cophenetic(inga.tree_rooted))),2)),phyl_dist=t(as.data.frame(cophenetic(inga.tree_rooted)))[lower.tri(as.data.frame(cophenetic(inga.tree_rooted)))])
+names(pairwise_phyl_distance) <- c("species_1","species_2","phyl_dist")
+
+
+
+plot(inga.tree_rooted,no.margin=T,edge.width=2,cex = 0.5, align.tip.label= T)
+```
+
+We start at the species level to get the within assesion comparisons (chemical similarity between samples of at the same site)
+```{r}
+
+chem_similarity <- read.csv(here("./data/chemical_similarity/allcomps_sample_similarity_2020_12_13.csv"),row.names = 1,stringsAsFactors = F)
+
+
+chem_similarity_long <- data.frame(t(combn(names(as.data.frame(chem_similarity)),2)),chem_dist=t(as.data.frame(chem_similarity))[lower.tri(as.data.frame(chem_similarity))])
+names(chem_similarity_long) <- c("species_1","species_2","chem_dist")
+
+
+chem_similarity_long_1 <- cSplit(chem_similarity_long,splitCols = c("species_1","species_2"),sep = "_",drop = F)[,c("species_1_1","species_2_1","chem_dist")]
+names(chem_similarity_long_1) <- c("sample_1","sample_2","chem_dist")
+
+chem_similarity_long_2 <- merge(chem_similarity_long_1,phy_code[,c("Species_Code","Species","Site")],by.x= "sample_1",by.y = "Species_Code",all.x=T)
+names(chem_similarity_long_2) <- c("sample_1","sample_2","chem_dist","species_1","Site_1")
+
+chem_similarity_long_3 <- merge(chem_similarity_long_2,phy_code[,c("Species_Code","Species","Site")],by.x= "sample_2",by.y = "Species_Code",all.x=T)
+names(chem_similarity_long_3) <- c("sample_2","sample_1","chem_dist","species_1","Site_1","species_2","Site_2")
+
+chem_similarity_long_3$type <- "Other"
+
+chem_similarity_long_3$type[chem_similarity_long_3$sample_1 == chem_similarity_long_3$sample_2] <- "Within_Assesions"
+
+
+chem_similarity_long_4 <- chem_similarity_long_3[chem_similarity_long_3$type != "Other",c("species_1","species_2","chem_dist","Site_1","Site_2","type")]
+
+chem_similarity_long_4$phyl_dist <- 0
+
+```
+next we move to the within species level (comparison between accesions of the same species)
+```{r}
+actual_samples_assesion_level <- read.csv(here("./data/chemical_similarity/allcomps_accession_similarity_2020_12_13.csv"),row.names = 1,stringsAsFactors = F)
+
+
+actual_samples_assesion_level_long <- data.frame(t(combn(names(as.data.frame(actual_samples_assesion_level)),2)),chem_dist=t(as.data.frame(actual_samples_assesion_level))[lower.tri(as.data.frame(actual_samples_assesion_level))])
+names(actual_samples_assesion_level_long) <- c("sample_1","sample_2","chem_dist")
+
+actual_samples_assesion_level_long_1 <- cSplit(actual_samples_assesion_level_long,splitCols = c("sample_1","sample_2"),sep = "_",drop = F)[,c("sample_1_1","sample_2_1","chem_dist","sample_1_2","sample_2_2")]
+names(actual_samples_assesion_level_long_1) <- c("asc_1","asc_2","chem_dist","species_1","species_2")
+
+actual_samples_assesion_level_long_2 <- actual_samples_assesion_level_long_1[actual_samples_assesion_level_long_1$species_1 %in% phy_code$Species & actual_samples_assesion_level_long_1$species_2 %in% phy_code$Species,]
+
+actual_samples_assesion_level_long_3 <- merge(actual_samples_assesion_level_long_2,phy_code[,c("Species_Code","Site")],by.x= "asc_1",by.y = "Species_Code",all.x=T,allow.cartesian=TRUE)
+actual_samples_assesion_level_long_4 <- merge(actual_samples_assesion_level_long_3,phy_code[,c("Species_Code","Site")],by.x= "asc_2",by.y = "Species_Code",all.x=T,allow.cartesian=TRUE)
+
+
+#in this case we also need the accesion level tree where the same species at multiple sites are not grouped
+assesion_tree <- read.tree(here("./data/Inga_IQtree_modeltesting_revised_Newick_matching_chem.tre"))
+
+pairwise_phyl_distance_accesion <- data.frame(t(combn(names(as.data.frame(vcv(assesion_tree))),2)),phyl_dist=t(as.data.frame(vcv(assesion_tree)))[lower.tri(as.data.frame(vcv(assesion_tree)))])
+names(pairwise_phyl_distance_accesion) <-  c("species_1","species_2","phyl_dist")
+
+pairwise_phyl_distance_accesion_1 <- cSplit(pairwise_phyl_distance_accesion,splitCols = c("species_1","species_2"),sep = "_",drop = F)[,c("species_1_1","species_2_1","phyl_dist")]
+
+
+names(pairwise_phyl_distance_accesion_1) <- c("species_1","species_2","phyl_dist")
+
+phyl_rev <- pairwise_phyl_distance_accesion_1[,c(2,1,3)]
+names(phyl_rev) <- c("species_1","species_2","phyl_dist")
+
+pairwise_phyl_distance_accesion_2 <- rbind(pairwise_phyl_distance_accesion_1,phyl_rev)
+actual_samples_assesion_level_long_5 <- merge(actual_samples_assesion_level_long_4,pairwise_phyl_distance_accesion_2,by.x = c("asc_2","asc_1"),by.y=c("species_1","species_2"),all.x=T,)
+
+actual_samples_assesion_level_long_6 <- actual_samples_assesion_level_long_5[,c("species_1","species_2","chem_dist","Site.x","Site.y","phyl_dist")]
+names(actual_samples_assesion_level_long_6) <- c("species_1","species_2","chem_dist","Site_1","Site_2","phyl_dist")
+
+actual_samples_assesion_level_long_7 <- actual_samples_assesion_level_long_6[as.character(actual_samples_assesion_level_long_6$species_1) == as.character(actual_samples_assesion_level_long_6$species_2) & actual_samples_assesion_level_long_6$Site_1 != actual_samples_assesion_level_long_6$Site_2,]
+
+actual_samples_assesion_level_long_7$type <- "Within_species"
+
+chem_similarity_long_5 <- rbind(chem_similarity_long_4,actual_samples_assesion_level_long_7)
+table(chem_similarity_long_5$type)
+```
+Lastly, we look at the between species level
+```{r}
+actual_samples_species_level <- read.csv(here("./data/chemical_similarity/allcomps_species_similarity_2020_12_13.csv"),row.names = 1,stringsAsFactors = F)
+
+actual_samples_species_level_long <- data.frame(t(combn(names(as.data.frame(actual_samples_species_level)),2)),chem_dist=t(as.data.frame(actual_samples_species_level))[lower.tri(as.data.frame(actual_samples_species_level))])
+names(actual_samples_species_level_long) <- c("species_1","species_2","chem_dist")
+
+actual_samples_species_level_long_1 <- actual_samples_species_level_long[actual_samples_species_level_long$species_1 %in% phy_code$Species & actual_samples_species_level_long$species_2 %in% phy_code$Species,]
+
+actual_samples_species_level_long_2 <- merge(actual_samples_species_level_long_1,phy_code[,c("Species","Site")],by.x= "species_1",by.y = "Species",all.x=T,allow.cartesian=TRUE)
+actual_samples_species_level_long_3 <- merge(actual_samples_species_level_long_2,phy_code[,c("Species","Site")],by.x= "species_2",by.y = "Species",all.x=T,allow.cartesian=TRUE)
+
+pairwise_phyl_distance_rev <- pairwise_phyl_distance[,c(2,1,3)]
+names(pairwise_phyl_distance_rev) <-  c("species_1","species_2","phyl_dist")
+pairwise_phyl_distance_1 <- rbind(pairwise_phyl_distance,pairwise_phyl_distance_rev)
+
+actual_samples_species_level_long_4 <- merge(actual_samples_species_level_long_3,pairwise_phyl_distance_1,by.x = c("species_2","species_1"),by.y=c("species_1","species_2"),all.x=T)
+
+names(actual_samples_species_level_long_4) <- c("species_1","species_2","chem_dist","Site_1","Site_2","phyl_dist")
+
+actual_samples_species_level_long_4$type <- "Other"
+
+syster_comps <- read.csv(here("./data/sister_species_comparisons.csv"))[,c(1,2,5)]
+
+for(i in 1:nrow(syster_comps)){
+actual_samples_species_level_long_4$type[(actual_samples_species_level_long_4$species_1 == syster_comps$samp_1[i] & actual_samples_species_level_long_4$species_2 == syster_comps$samp_2[i])]  <- "Sister_Species"}
+
+chem_similarity_long_6 <- rbind(chem_similarity_long_5,actual_samples_species_level_long_4)
+
+table(chem_similarity_long_6$type)
+
+#fix species names miss matches
+#remove T88 from chemistry data because it doesn't have phylogeny and is not in the rest of the analysis
+chem_similarity_long_6 <- chem_similarity_long_6[chem_similarity_long_6$species_1 != "T88" | chem_similarity_long_6$species_2 !="T88",]
+
+
+#Change M27b in the chem data to match phylogeny
+chem_similarity_long_6$species_1[chem_similarity_long_6$species_1 == "M27b"] <- "M27"
+chem_similarity_long_6$species_2[chem_similarity_long_6$species_2 == "M27b"] <- "M27"
+
+#Change Zygia.mediana in the chem data to match phylogeny
+chem_similarity_long_6$species_1[chem_similarity_long_6$species_1 == "Zygia.mediana"] <- "Zygia_mediana"
+chem_similarity_long_6$species_2[chem_similarity_long_6$species_2 == "Zygia.mediana"] <- "Zygia_mediana"
+
+
+chem_similarity_long_6 <- droplevels(chem_similarity_long_6)
+
+
+```
+
+
+
+```{r}
+chem_similarity_long_6$type[chem_similarity_long_6$type == "Sister_Species" & chem_similarity_long_6$Site_1 == chem_similarity_long_6$Site_2] <- "Sympatric_Syster_Species"
+
+chem_similarity_long_6$type[chem_similarity_long_6$type == "Other" & chem_similarity_long_6$Site_1 == chem_similarity_long_6$Site_2] <- "Sympatric_Interspecific"
+
+
+chem_similarity_long_6$type[chem_similarity_long_6$type == "Sister_Species" & chem_similarity_long_6$Site_1 != chem_similarity_long_6$Site_2] <- "Parapatric_Syster_Species"
+
+chem_similarity_long_6$type[chem_similarity_long_6$type == "Other" & chem_similarity_long_6$Site_1 != chem_similarity_long_6$Site_2] <- "Parapatric_Interspecific"
+
+
+unique(chem_similarity_long_6$type)
+
+
+chem_similarity_long_6$type <- factor(chem_similarity_long_6$type, levels = c("Within_Assesions","Within_species","Sympatric_Syster_Species","Parapatric_Syster_Species","Sympatric_Interspecific","Parapatric_Interspecific"))
+table(chem_similarity_long_6$type)
+```
+
+Now we read in the Null Model data
+```{r}
+
+
+files <- list.files(here("./data/chemical_similarity/Chem_Similarity_Null_Model/"),pattern = "_allcomps_sample_similarity",full.names = T)
+all_data <- data.frame()
+
+for(file in files){
+  file_ind <- read.csv(file,stringsAsFactors = F,row.names = 1)
+  file_ind_long <- data.frame(t(combn(names(as.data.frame(file_ind)),2)),chem_dist=t(as.data.frame(file_ind))[lower.tri(as.data.frame(file_ind))])
+  file_ind_long$iteration <- gsub("_allcomps_sample_similarity.csv","",gsub("/Users/dlforrister/Documents_Mac/CODE_GIT_HUB_2017_Aug_31/Evolution_Of_Inga_Chemistry/32_Github_upload_new_phylogney/./data/chemical_similarity/Chem_Similarity_Null_Model//","",file))
+  all_data <- rbind(all_data,file_ind_long)
+}
+
+boxplot(all_data$chem_dist~all_data$iteration)
+
+```
+```{r}
+chem_sim_mean <- mean(all_data$chem_dist)
+sd_sim_mean <- sd(all_data$chem_dist)
+
+boxplot(chem_similarity_long_6$chem_dist ~ chem_similarity_long_6$type,outline=F) 
+
+chem_similarity_long_6$par_sim <- "sympatric"
+chem_similarity_long_6$par_sim[chem_similarity_long_6$type %in% c("Parapatric_Interspecific","Parapatric_Syster_Species","Within_species")] <- "Parapatric"
+
+chem_similarity_long_6$comparison <- "Within Species"
+chem_similarity_long_6$comparison[chem_similarity_long_6$type %in% c("Sympatric_Syster_Species","Parapatric_Syster_Species")] <- "Between Sister Species"
+chem_similarity_long_6$comparison[chem_similarity_long_6$type %in% c("Parapatric_Interspecific","Sympatric_Interspecific")] <- "Between Species"
+
+chem_similarity_long_6$comparison <- factor(chem_similarity_long_6$comparison,levels = c("Within Species","Between Sister Species","Between Species"))
+
+unique(chem_similarity_long_6$type)
+
+
+Chem_similarity_graph <- ggplot() +
+  geom_boxplot(data = chem_similarity_long_6,
+               aes(x = type, y = chem_dist,fill = par_sim),outlier.fill = NA,
+  outlier.shape = NA,
+  outlier.size = NA,
+  outlier.stroke = NA) + facet_grid(.~comparison,scales="free") +  geom_hline(yintercept=chem_sim_mean,
+                color = "red", size=1) + geom_hline(yintercept=chem_sim_mean +2*sd_sim_mean,
+                color = "red", size=0.5,linetype="dashed") + geom_hline(yintercept=chem_sim_mean -2*sd_sim_mean,
+                color = "red", size=0.5,linetype="dashed")  + theme_classic() + theme(axis.text.x = element_blank(),axis.ticks.x = element_blank(),plot.title = element_text(size = rel(10)))+
+  xlab("Comparison Type") + ylab("Chemical Similarity") + labs(fill = element_blank())
+            
+
+
+
+#ggsave(Chem_similarity_graph,path = here("./results/"),filename = "Figure_5_chem_similarity_comparisons.pdf",dpi = 600, height = 5, width = 5)
+
+
+Chem_similarity_graph
+```
+Figure_S3 GAM model for phylogenetic distance vs chemical distnace
+```{r}
+
+mod_lm <- gam(chem_dist ~ phyl_dist, data=chem_similarity_long_6)
+
+chem_similarity_long_7 <- chem_similarity_long_6[!(chem_similarity_long_6$type %in% c("Within_Assesions", "Within_species")),]
+
+#drop zygia 
+chem_similarity_long_7 <- chem_similarity_long_7[chem_similarity_long_7$species_1 != "Zygia_mediana" & chem_similarity_long_7$species_2 != "Zygia_mediana"]
+
+chem_similarity_long_8 <- unique(chem_similarity_long_7[,c("species_1","species_2","chem_dist","phyl_dist","par_sim")],by = c("species_1","species_2","chem_dist","phyl_dist"))
+
+
+
+# p <- ggplot(chem_similarity_long_8, aes(y= chem_dist, x=phyl_dist)) + geom_ribbon(
+#     aes(ymin = chem_sim_mean -2*sd_sim_mean, ymax = chem_sim_mean +2*sd_sim_mean), fill = "grey80")+ geom_point() + 
+#   xlab("Phylogenetic Distance") + ylab("Chemical Similarity") + labs(fill = element_blank()) +  geom_smooth(method = "lm",size=2)
+
+
+
+p <- ggplot(chem_similarity_long_8, aes(y= chem_dist, x=phyl_dist)) + geom_point() + geom_hline(yintercept=chem_sim_mean,color = "red", size=1) + geom_hline(yintercept=chem_sim_mean +2*sd_sim_mean,
+                color = "red", size=0.5,linetype="dashed") + geom_hline(yintercept=chem_sim_mean -2*sd_sim_mean,
+                color = "red", size=0.5,linetype="dashed")  + theme_classic() + theme(plot.title = element_text(size = rel(10)))+
+  xlab("Phylogenetic Distance") + ylab("Chemical Similarity") + labs(fill = element_blank()) 
+
+
+#geom_smooth(method = "lm")
+  
+#how many coparisons are within null model range?
+table((chem_similarity_long_8$chem_dist > chem_sim_mean -2*sd_sim_mean & chem_similarity_long_8$chem_dist < chem_sim_mean +2*sd_sim_mean))/nrow(chem_similarity_long_8)
+
+
+#ggsave(p,path = here("./results/"),filename = "Figure_5B_phyl_dist_chem_dist.pdf",dpi = 600, height = 5, width = 5)
+p
+
+```
+
+```{r}
+#phyl_dist
+library(vegan)
+phyl_dist_matrix <- as.data.frame(cophenetic(inga.tree_rooted))
+chem_dist_matrix <- 1-actual_samples_species_level
+
+phyl_dist_matrix <- phyl_dist_matrix[row.names(phyl_dist_matrix) != "Zygia_mediana",names(phyl_dist_matrix) != "Zygia_mediana"]
+chem_dist_matrix <- chem_dist_matrix[row.names(chem_dist_matrix) != "Zygia_mediana",names(chem_dist_matrix) != "Zygia_mediana"]
+
+vegan::mantel(phyl_dist_matrix,chem_dist_matrix)
+
+```
+
+Now convert chemical distance into PCAO axis and test for model divergence
+
+```{r}
+require(diverge)
+require(ape)
+library(vegan)
+
+
+chem_similarity_long_8
+
+
+res_chemdist = model_select(div = 1-chem_similarity_long_8$chem_dist, ages = chem_similarity_long_8$phyl_dist,cats = as.numeric(as.factor(chem_similarity_long_8$par_sim)), models=c("BM_null", "OU_null", "DA_null","DA_cat"), absolute = T,parallel = T, cores = 3)
+
+
+res_chemdist
+
+
+brn_LL <- -2628.63337
+ou_LL <- -2564.11160
+DA_ll <- 3565.14853
+
+#log ratio test brown (DF 1) vs OU (DF 2)
+teststat <- -2 * (as.numeric(brn_LL)-as.numeric(ou_LL))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+# OU model is better than Brown
+
+#log ratio test OU vs DA
+teststat <- -2 * (as.numeric(ou_LL)-as.numeric(DA_ll))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+# DA model is better than Brown, by a lot
+
+               
+
+```
+
+
+
+```{r}
+
+phy_code <- read.csv(here("./data/species_code_name_species_2020_8_25.csv"))
+names(phy_code)[1] <- "Species_Code"
+
+pht_div <- read.csv(here("./data/A_Hill_func_diversity_sample_level.csv"),row.names=1)
+
+pht_div <- cSplit(pht_div,"species_code","_",drop = T)
+
+pht_div_1 <- merge(pht_div,phy_code,by.x= "species_code_1",by.y = "Species_Code",all.x=T)
+
+pht_div_2 <- pht_div_1[,c("Species","D_q")]
+
+pht_div_2 <- pht_div_2[!pht_div_2$Species %in% c("no phylogney","NA"),]
+
+pht_div_2 <- pht_div_2[!is.na(pht_div_2$Species)]
+
+pht_div_2_avg <- setDT(pht_div_2)[ , .(mean_phyt_div = mean(D_q,na.rm = T), sd_phyt_div = sd(D_q,na.rm = T)), by = Species]
+
+pht_div_2_avg
+pht_div_2_avg_vector <- pht_div_2_avg$mean_phyt_div
+pht_div_2_avg_vector <- setNames(pht_div_2_avg_vector,pht_div_2_avg$Species)
+pht_div_2_avg_dist <- vegdist(pht_div_2_avg_vector,diag = T,upper = T,method = "euclidean")
+
+pairwise_phyt_div_dist <- melt(as.matrix(pht_div_2_avg_dist), varnames = c("species_1", "species_2"))
+
+pairwise_phyt_div_dist_sd <- merge(pairwise_phyt_div_dist,pht_div_2_avg[,c(1,3)],by.x = "species_1", by.y = "Species")
+names(pairwise_phyt_div_dist_sd) <- c("species_1","species_2","phyt_div_dist", "species_1_sd")
+pairwise_phyt_div_dist_sd <- merge(pairwise_phyt_div_dist_sd,pht_div_2_avg[,c(1,3)],by.x = "species_2", by.y = "Species")
+names(pairwise_phyt_div_dist_sd) <- c("species_1","species_2","phyt_div_dist", "species_1_sd","species_2_sd")
+
+pairwise_phyt_div_dist_sd <- merge(pairwise_phyt_div_dist_sd,pairwise_phyl_distance, by = c("species_1","species_2"),all.x = T)
+
+pairwise_phyt_div_dist_sd <- merge(pairwise_phyt_div_dist_sd,phy_code[,c(2,4)],by.x = "species_1", by.y = "Species")
+pairwise_phyt_div_dist_sd <- merge(pairwise_phyt_div_dist_sd,phy_code[,c(2,4)],by.x = "species_2", by.y = "Species")
+
+pairwise_phyt_div_dist_sd$type <- "para"
+
+pairwise_phyt_div_dist_sd$type[ pairwise_phyt_div_dist_sd$Site.x == pairwise_phyt_div_dist_sd$Site.y] <- "sym"
+
+pairwise_phyt_div_dist_sd_2 <- pairwise_phyt_div_dist_sd[pairwise_phyt_div_dist_sd$species_1 != pairwise_phyt_div_dist_sd$species_2,]
+
+
+pairwise_phyt_div_dist_sd_3 <- pairwise_phyt_div_dist_sd_2[! is.na(pairwise_phyt_div_dist_sd_2$phyl_dist),]
+
+#drop zygia 
+pairwise_phyt_div_dist_sd_3 <- pairwise_phyt_div_dist_sd_3[pairwise_phyt_div_dist_sd_3$species_1 != "Zygia_mediana" & pairwise_phyt_div_dist_sd_3$species_2 != "Zygia_mediana",]
+
+
+res_phyt = model_select(div = pairwise_phyt_div_dist_sd_3$phyt_div_dist, ages = pairwise_phyt_div_dist_sd_3$phyl_dist, cats = as.numeric(as.factor(pairwise_phyt_div_dist_sd_3$type)), models=c("BM_null", "OU_null", "DA_null","DA_cat"), absolute = T,parallel = T, cores = 3)
+
+plot(pairwise_phyt_div_dist_sd_3$phyt_div_dist ~ pairwise_phyt_div_dist_sd_3$phyl_dist)
+
+res_phyt
+
+brn_LL <- -45895.65873
+ou_LL <- -45703.01921
+DA_ll <- -45702.98214
+
+#log ratio test brown (DF 1) vs OU (DF 2)
+teststat <- -2 * (as.numeric(brn_LL)-as.numeric(ou_LL))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+# OU model is better than Brown ***
+
+#log ratio test OU vs DA
+teststat <- -2 * (as.numeric(ou_LL)-as.numeric(DA_ll))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+# DA model is better than OU, by a lot
+
+
+
+
+```
+
+
+```{r}
+extraction_per <- read.csv(here("./data/sample_level_extraction_percent_correct_names.csv"),row.names=1,stringsAsFactors = F) 
+extraction_per <- cSplit(extraction_per,"sample_name","_",drop = T)
+
+extraction_per_1 <-extraction_per[,c("sample_name_2","percent_extracted")]
+names(extraction_per_1) <- c("species","percent_extracted")
+
+extraction_per_1$species <- as.character(extraction_per_1$species)
+
+extraction_per_1$species[extraction_per_1$species == "Zygia mediana"] <- "Zygia_mediana"
+extraction_per_1$species[extraction_per_1$species == "M27b"] <- "M27"
+
+extraction_per_2 <- extraction_per_1[!extraction_per_1$species %in% c("no phylogney","T88"),]
+
+extraction_per_avg <- setDT(extraction_per_2)[ , .(mean_ext_per = mean(percent_extracted,na.rm = T), sd_ext_per = sd(percent_extracted,na.rm = T)), by = species]
+
+ext_per_avg_vector <- extraction_per_avg$mean_ext_per
+ext_per_avg_vector <- setNames(ext_per_avg_vector,extraction_per_avg$species)
+ext_per_avg_dist <- vegdist(ext_per_avg_vector,diag = T,upper = T,method = "euclidean")
+
+pairwise_ext_per_dist <- melt(as.matrix(ext_per_avg_dist), varnames = c("species_1", "species_2"))
+
+pairwise_ext_per_dist_sd <- merge(pairwise_ext_per_dist,extraction_per_avg[,c(1,3)],by.x = "species_1", by.y = "species")
+names(pairwise_ext_per_dist_sd) <- c("species_1","species_2","ext_per_dist", "species_1_sd")
+pairwise_ext_per_dist_sd <- merge(pairwise_ext_per_dist_sd,extraction_per_avg[,c(1,3)],by.x = "species_2", by.y = "species")
+names(pairwise_ext_per_dist_sd) <- c("species_1","species_2","ext_per_dist", "species_1_sd","species_2_sd")
+
+pairwise_ext_per_dist_sd <- merge(pairwise_ext_per_dist_sd,pairwise_phyl_distance, by = c("species_1","species_2"),all.x = T)
+
+pairwise_ext_per_dist_sd <- merge(pairwise_ext_per_dist_sd,phy_code[,c(2,4)],by.x = "species_1", by.y = "Species")
+pairwise_ext_per_dist_sd <- merge(pairwise_ext_per_dist_sd,phy_code[,c(2,4)],by.x = "species_2", by.y = "Species")
+
+pairwise_ext_per_dist_sd$type <- "para"
+
+pairwise_ext_per_dist_sd$type[ pairwise_ext_per_dist_sd$Site.x == pairwise_ext_per_dist_sd$Site.y] <- "sym"
+
+pairwise_ext_per_dist_sd_2 <- pairwise_ext_per_dist_sd[pairwise_ext_per_dist_sd$species_1 != pairwise_ext_per_dist_sd$species_2,]
+
+
+pairwise_ext_per_dist_sd_3 <- pairwise_ext_per_dist_sd_2[! is.na(pairwise_ext_per_dist_sd_2$phyl_dist),]
+
+#drop zygia 
+pairwise_ext_per_dist_sd_3 <- pairwise_ext_per_dist_sd_3[pairwise_ext_per_dist_sd_3$species_1 != "Zygia_mediana" & pairwise_ext_per_dist_sd_3$species_2 != "Zygia_mediana",]
+
+plot(pairwise_ext_per_dist_sd_3$ext_per_dist ~ pairwise_ext_per_dist_sd_3$phyl_dist)
+
+res_ext = model_select(div = pairwise_ext_per_dist_sd_3$ext_per_dist, ages = pairwise_ext_per_dist_sd_3$phyl_dist, cats = as.numeric(as.factor(pairwise_ext_per_dist_sd_3$type)), models=c("BM_null", "OU_null", "DA_null","DA_cat"), absolute = T,parallel = T, cores = 3)
+
+
+
+res_ext
+
+brn_LL <- -43701.94161
+ou_LL <- -43667.86767
+DA_ll <- -43667.86767
+
+#log ratio test brown (DF 1) vs OU (DF 2)
+teststat <- -2 * (as.numeric(brn_LL)-as.numeric(ou_LL))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+# OU model is better than Brown ***
+
+#log ratio test OU vs DA
+teststat <- -2 * (as.numeric(ou_LL)-as.numeric(DA_ll))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+
+#DA not better than OU. 
+
+
+```
+
+```{r}
+sampsByCompounds_samples_level <- read.csv(here("./data/1_sampsbycomps_combined_nocutoff_sample_2020_10_7.csv"),stringsAsFactors = F)
+
+names(sampsByCompounds_samples_level)[1] <- "Species_Code_sample_num"
+names(sampsByCompounds_samples_level) <- gsub("X","",names(sampsByCompounds_samples_level))
+
+
+sampsByCompounds_samples_level <- cSplit(sampsByCompounds_samples_level,"Species_Code_sample_num","_",drop = T)
+
+
+
+species_names <- read.csv(here("./data/3_sampsbycomps_combined_nocutoff_accession_2020_10_7.csv"),stringsAsFactors = F)[,1:2]
+
+species_names_df <- cSplit(species_names,"X","_",drop = T)[,2:3]
+names(species_names_df) <- c("species_code","species")
+
+
+sampsByCompounds_samples_level_1 <- merge(sampsByCompounds_samples_level,species_names_df,by.x="Species_Code_sample_num_1",by.y = "species_code",all=T)
+
+
+last_col = ncol(sampsByCompounds_samples_level_1)
+columns_order <- c(1,last_col-1,last_col,2:(ncol(sampsByCompounds_samples_level_1)-2))
+sampsByCompounds_samples_level_2 <- sampsByCompounds_samples_level_1[, ..columns_order]
+
+
+comps_only <- as.data.frame(sampsByCompounds_samples_level_2)[,c(4:ncol(sampsByCompounds_samples_level_2))]
+
+
+comps_sample <- data.frame(species_code = sampsByCompounds_samples_level_2$Species_Code_sample_num_1,sample_num = sampsByCompounds_samples_level_2$Species_Code_sample_num_2, species = sampsByCompounds_samples_level_2$species, ncomps = rowSums(comps_only>0))
+comps_sample$species <- as.character(comps_sample$species)
+
+comps_sample$species[comps_sample$species_code == "M41"] <- "ulei"
+comps_sample$species[comps_sample$species_code == "LA52"] <- "chartacea"
+
+
+comps_sample$species[comps_sample$species == "M27b"] <- "M27"
+comps_sample$species[comps_sample$species == "Zygia mediana"] <- "Zygia_mediana"
+
+comps_sample_match = comps_sample[comps_sample$species %in% inga.tree_rooted$tip.label,]
+
+
+ncomps_species <- setDT(comps_sample_match)[ , .(mean_ncomps = mean(ncomps,na.rm = T), sd_ncomps = sd(ncomps,na.rm = T)), by = species]
+ncomps_species
+
+ncomps_vector <- ncomps_species$mean_ncomps
+ncomps_vector <- setNames(ncomps_vector,ncomps_species$species)
+ncomps_avg_dist <- vegdist(ncomps_vector,diag = T,upper = T,method = "euclidean")
+
+pairwise_ncomps_dist <- melt(as.matrix(ncomps_avg_dist), varnames = c("species_1", "species_2"))
+
+pairwise_ncomps_dist_sd <- merge(pairwise_ncomps_dist,extraction_per_avg[,c(1,3)],by.x = "species_1", by.y = "species")
+names(pairwise_ncomps_dist_sd) <- c("species_1","species_2","ncomps_dist", "species_1_sd")
+pairwise_ncomps_dist_sd <- merge(pairwise_ncomps_dist_sd,extraction_per_avg[,c(1,3)],by.x = "species_2", by.y = "species")
+names(pairwise_ncomps_dist_sd) <- c("species_1","species_2","ncomps_dist", "species_1_sd","species_2_sd")
+
+pairwise_ncomps_dist_sd <- merge(pairwise_ncomps_dist_sd,pairwise_phyl_distance, by = c("species_1","species_2"),all.x = T)
+
+pairwise_ncomps_dist_sd <- merge(pairwise_ncomps_dist_sd,phy_code[,c(2,4)],by.x = "species_1", by.y = "Species")
+pairwise_ncomps_dist_sd <- merge(pairwise_ncomps_dist_sd,phy_code[,c(2,4)],by.x = "species_2", by.y = "Species")
+
+pairwise_ncomps_dist_sd$type <- "para"
+
+pairwise_ncomps_dist_sd$type[ pairwise_ncomps_dist_sd$Site.x == pairwise_ncomps_dist_sd$Site.y] <- "sym"
+
+pairwise_ncomps_dist_sd_2 <- pairwise_ncomps_dist_sd[pairwise_ncomps_dist_sd$species_1 != pairwise_ncomps_dist_sd$species_2,]
+
+
+pairwise_ncomps_dist_sd_3 <- pairwise_ncomps_dist_sd_2[! is.na(pairwise_ncomps_dist_sd_2$phyl_dist),]
+
+#drop zygia 
+pairwise_ncomps_dist_sd_3 <- pairwise_ncomps_dist_sd_3[pairwise_ncomps_dist_sd_3$species_1 != "Zygia_mediana" & pairwise_ncomps_dist_sd_3$species_2 != "Zygia_mediana",]
+
+plot(pairwise_ncomps_dist_sd_3$ncomps_dist ~ pairwise_ncomps_dist_sd_3$phyl_dist)
+
+res_ncomps = model_select(div = pairwise_ncomps_dist_sd_3$ncomps_dist, ages = pairwise_ncomps_dist_sd_3$phyl_dist, cats = as.numeric(as.factor(pairwise_ncomps_dist_sd_3$type)), models=c("BM_null", "OU_null", "DA_null","DA_cat"), absolute = T,parallel = T, cores = 3)
+
+
+
+res_ncomps
+
+brn_LL <- -77981.28028
+ou_LL <- -77980.63908
+DA_ll <- -77980.63908
+
+#log ratio test brown (DF 1) vs OU (DF 2)
+teststat <- -2 * (as.numeric(brn_LL)-as.numeric(ou_LL))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+# OU model is better than Brown ***
+
+#log ratio test OU vs DA
+teststat <- -2 * (as.numeric(ou_LL)-as.numeric(DA_ll))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+teststat <- -2 * (as.numeric(brn_LL)-as.numeric(DA_ll))
+pchisq(teststat, df = 1, lower.tail = FALSE)
+
+#DA not better than OU. 
+
+
+```
+```{r}
+
+```
+

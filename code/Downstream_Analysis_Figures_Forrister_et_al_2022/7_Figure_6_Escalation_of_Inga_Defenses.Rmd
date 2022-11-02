@@ -1,0 +1,474 @@
+---
+title: "Figure_6_Chemical_Investment"
+author: "Dale Forrister"
+date: "2/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+if (!require(here)) install.packages('here')
+library(here)
+if (!require(ape)) install.packages('ape')
+library(ape)
+if (!require(phangorn)) install.packages('phangorn')
+library(phangorn)
+if (!require(nlme)) install.packages('nlme')
+library(nlme)
+if (!require(geiger)) install.packages('geiger')
+library(geiger)
+if (!require(phytools)) install.packages('phytools')
+library(phytools)
+if (!require(data.table)) install.packages('data.table')
+library(data.table)
+if (!require(vegan)) install.packages('vegan')
+library(vegan)
+if (!require(tidyr)) install.packages('tidyr')
+library(tidyr)
+if (!require(splitstackshape)) install.packages('splitstackshape')
+library(splitstackshape)
+
+if (!require(ggplot2)) install.packages('ggplot2')
+library(ggplot2)
+if (!require(ggstance)) install.packages('ggstance')
+library(ggstance)
+if (!require(ggtree)) install.packages('ggtree')
+library(ggtree)
+if (!require(lmtest)) install.packages('lmtest')
+library(lmtest)
+if (!require(phylolm)) install.packages('phylolm')
+library(phylolm)
+
+here::here()
+
+```
+First read in phylogeny.
+
+This is a species level phylogney meaning all accessions collected at multiple sites have been combined into a single tip for all sites. 
+
+We have 98 species in the phylogeny and it has to be rooted with the Zygia outgroup
+
+```{r}
+inga.tree_rooted <-read.tree(here("data","Inga_Astralconstrained_datedTreePL_sptree_FINAL_Match_Utl.tre"))
+
+inga.tree_rooted <- multi2di(inga.tree_rooted)
+
+plot(inga.tree_rooted,no.margin=T,edge.width=2,cex = 0.5, align.tip.label= T)
+
+```
+
+Load extraction percent for each species.
+```{r}
+extraction_per <- read.csv(here("./data/sample_level_extraction_percent_correct_names.csv"),row.names=1,stringsAsFactors = F) 
+extraction_per <- cSplit(extraction_per,"sample_name","_",drop = T)
+
+extraction_per_1 <-extraction_per[,c("sample_name_2","percent_extracted")]
+names(extraction_per_1) <- c("species","percent_extracted")
+
+extraction_per_1$species <- as.character(extraction_per_1$species)
+
+extraction_per_1$species[extraction_per_1$species == "Zygia mediana"] <- "Zygia_mediana"
+extraction_per_1$species[extraction_per_1$species == "M27b"] <- "M27"
+
+extraction_per_2 <- extraction_per_1[!extraction_per_1$species %in% c("no phylogney","T88"),]
+
+extraction_per_avg <- setDT(extraction_per_2)[ , .(mean_ext_per = mean(percent_extracted,na.rm = T), sd_ext_per = sd(percent_extracted,na.rm = T)), by = species]
+
+```
+Calculate the number of compounds produced by each species
+```{R}
+
+sampsByCompounds_samples_level <- read.csv(here("./data/1_sampsbycomps_combined_nocutoff_sample_2020_10_7.csv"),stringsAsFactors = F)
+
+names(sampsByCompounds_samples_level)[1] <- "Species_Code_sample_num"
+names(sampsByCompounds_samples_level) <- gsub("X","",names(sampsByCompounds_samples_level))
+
+
+sampsByCompounds_samples_level <- cSplit(sampsByCompounds_samples_level,"Species_Code_sample_num","_",drop = T)
+
+
+
+species_names <- read.csv(here("./data/3_sampsbycomps_combined_nocutoff_accession_2020_10_7.csv"),stringsAsFactors = F)[,1:2]
+
+species_names_df <- cSplit(species_names,"X","_",drop = T)[,2:3]
+names(species_names_df) <- c("species_code","species")
+
+
+sampsByCompounds_samples_level_1 <- merge(sampsByCompounds_samples_level,species_names_df,by.x="Species_Code_sample_num_1",by.y = "species_code",all=T)
+
+
+last_col = ncol(sampsByCompounds_samples_level_1)
+columns_order <- c(1,last_col-1,last_col,2:(ncol(sampsByCompounds_samples_level_1)-2))
+sampsByCompounds_samples_level_2 <- sampsByCompounds_samples_level_1[, ..columns_order]
+
+
+comps_only <- as.data.frame(sampsByCompounds_samples_level_2)[,c(4:ncol(sampsByCompounds_samples_level_2))]
+
+
+comps_sample <- data.frame(species_code = sampsByCompounds_samples_level_2$Species_Code_sample_num_1,sample_num = sampsByCompounds_samples_level_2$Species_Code_sample_num_2, species = sampsByCompounds_samples_level_2$species, ncomps = rowSums(comps_only>0))
+comps_sample$species <- as.character(comps_sample$species)
+
+comps_sample$species[comps_sample$species_code == "M41"] <- "ulei"
+comps_sample$species[comps_sample$species_code == "LA52"] <- "chartacea"
+
+
+comps_sample$species[comps_sample$species == "M27b"] <- "M27"
+comps_sample$species[comps_sample$species == "Zygia mediana"] <- "Zygia_mediana"
+
+comps_sample_match = comps_sample[comps_sample$species %in% inga.tree_rooted$tip.label,]
+
+
+ncomps_species <- setDT(comps_sample_match)[ , .(mean_ncomps = mean(ncomps,na.rm = T), sd_ncomps = sd(ncomps,na.rm = T)), by = species]
+ncomps_species
+```
+Read in Phyotochemical diveristy. This is calculated using HilR. See ./code/3_Figure_2_normalized_phytochemical_diveristy for details
+```{R}
+phy_code <- read.csv(here("./data/species_code_name_species_2020_8_25.csv"))
+names(phy_code)[1] <- "Species_Code"
+
+pht_div <- read.csv(here("./data/A_Hill_func_diversity_sample_level.csv"),row.names=1)
+
+pht_div <- cSplit(pht_div,"species_code","_",drop = T)
+
+pht_div_1 <- merge(pht_div,phy_code,by.x= "species_code_1",by.y = "Species_Code",all.x=T)
+
+pht_div_2 <- pht_div_1[,c("Species","D_q")]
+
+pht_div_2 <- pht_div_2[!pht_div_2$Species %in% c("no phylogney","NA"),]
+
+pht_div_2 <- pht_div_2[!is.na(pht_div_2$Species)]
+
+pht_div_2_avg <- setDT(pht_div_2)[ , .(mean_phyt_div = mean(D_q,na.rm = T), sd_phyt_div = sd(D_q,na.rm = T)), by = Species]
+
+pht_div_2_avg
+
+
+```
+
+Make the Phylogenetic Bargraph using facet plots
+```{R}
+p <- ggtree(inga.tree_rooted) 
+
+d1 <- data.frame(id = ncomps_species$species, value = ncomps_species$mean_ncomps, xmin_sd = ncomps_species$mean_ncomps-ncomps_species$sd_ncomps, xmax_sd = ncomps_species$mean_ncomps+ncomps_species$sd_ncomps)
+
+
+
+p2 <- facet_plot(p, panel= "Number of Compounds", data=d1, geom= geom_point2, aes(x= value,xmin=xmin_sd, xmax=xmax_sd), color='black') + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15))  
+
+
+
+
+
+
+p3 <- facet_plot(p2, panel="Number of Compounds", data=d1, geom=geom_segment, 
+           aes(x=xmin_sd, xend=xmax_sd, y=y, yend=y), size=0.5, color='black') 
+
+p3 <- facet_plot(p3, panel="Number of Compounds", data=d1, geom=geom_vline, 
+           aes(xintercept=mean(d1$value)), size=0.5, color='red',linetype = "dashed")
+
+
+d2 <- data.frame(id = extraction_per_avg$species, value = extraction_per_avg$mean_ext_per, xmin_sd = extraction_per_avg$mean_ext_per-extraction_per_avg$sd_ext_per, xmax_sd = extraction_per_avg$mean_ext_per+extraction_per_avg$sd_ext_per)
+
+p4 <- facet_plot(p3, panel= "Chemical Investment(%DW)", data=d2, geom= geom_point2, aes(x= value,xmin=xmin_sd, xmax=xmax_sd), color='black') + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) 
+
+p5 <- facet_plot(p4, panel="Chemical Investment(%DW)", data=d2, geom=geom_segment, 
+           aes(x=xmin_sd, xend=xmax_sd, y=y, yend=y), size=0.5, color='black')
+p5 <- facet_plot(p5, panel="Chemical Investment(%DW)", data=d2, geom=geom_vline, 
+           aes(xintercept=mean(d2$value)), size=0.5, color='red',linetype = "dashed")
+
+d3 <- data.frame(id = pht_div_2_avg$Species, value = as.numeric(pht_div_2_avg$mean_phyt_div), xmin_sd = pht_div_2_avg$mean_phyt_div-pht_div_2_avg$sd_phyt_div, xmax_sd = pht_div_2_avg$mean_phyt_div+pht_div_2_avg$sd_phyt_div,category = "Phytochemical Diversity") 
+
+p6 <- facet_plot(p5, panel= "Phytochemical Diversity", data=d3, geom=geom_point, aes(x=value), color='black') + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15))
+
+
+p7 <- facet_plot(p6, panel="Phytochemical Diversity", data=d3, geom=geom_segment, 
+           aes(x=xmin_sd, xend=xmax_sd, y=y, yend=y), size=0.5, color='black')
+
+p7 <- facet_plot(p7, panel="Phytochemical Diversity", data=d3, geom=geom_vline, 
+           aes(xintercept=mean(d3$value)), size=0.5, color='red',linetype = "dashed")
+
+hill_phyto_diversity_evolved_random <- read.csv(here("./results/null_model/Hill_func_diversity_Evolved_Random_all_null.csv"))
+
+hill_phyto_diversity_evolved_random_avg <- setDT(hill_phyto_diversity_evolved_random)[,.(Raos_Q_mean = mean(Raos_Q), Raos_Q_sd = sd(Raos_Q), D_q_mean = mean(D_q), D_q_sd =sd(D_q), MD_q_mean = mean(MD_q), MD_q_sd = sd(MD_q)),by="species_code"]
+
+
+
+p8 <- facet_plot(p7, panel="Phytochemical Diversity", data=d3, geom=geom_vline, 
+           aes(xintercept=mean(mean(hill_phyto_diversity_evolved_random_avg$D_q_mean))), size=0.5, color='blue',linetype = "dashed")
+
+ggsave(p8,path = here("./results"),filename = "Figure_6_Chem_Invest_Plot_DQ.pdf",dpi = 600,width = 12,height = 12)
+
+
+p8
+
+
+
+```
+Now we test for evolutionary trends in these three variables.
+```{r , echo=T}
+
+#a) Percent Extraction
+extraction_per_avg$standardized <- (extraction_per_avg$mean_ext_per - mean(extraction_per_avg$mean_ext_per))/sd(extraction_per_avg$mean_ext_per)
+
+per_extract<- extraction_per_avg$mean_ext_per
+per_extract <- setNames(per_extract,extraction_per_avg$species)
+
+fit_ext <-fastAnc(inga.tree_rooted,per_extract,vars=TRUE,CI=TRUE)
+
+age_by_vale <- merge(data.frame(value =fit_ext$ace), data.frame(node_age = dist.nodes(inga.tree_rooted)[99,]),by = 0, all.x=T)
+
+plot(age_by_vale$value ~ age_by_vale$node_age) | abline(lm(age_by_vale$value ~ age_by_vale$node_age))
+
+summary(lm(age_by_vale$value ~ age_by_vale$node_age))
+
+
+plotTree(inga.tree_rooted,offset=1) | tiplabels() | nodelabels()
+obj<-contMap(inga.tree_rooted,per_extract,plot=F)
+plot(obj)
+```
+```{r}
+
+phylosig(inga.tree_rooted,per_extract,test=TRUE)
+#extraction percent K = 0.514795, P= 0.066
+```
+K = 1 means that relatives resemble one another as much as we should expect under BM; **K < 1 means that there is less “phylogenetic signal” than expected under BM**, while K > 1 means that there is more. A significant p-value returned from phylosig tells you that there is significant phylogenetic signal - that is, close relatives are more similar than random pairs of species
+
+```{r , echo=T}
+EvoModels <- c("BM", 
+               "OU", "white")
+
+iterations = 10000 #note for the actual data in the paper this was run 1,000,000 times. 
+cores = 4
+
+#extraction_per_avg$standardized <- (extraction_per_avg$mean_ext_per - mean(extraction_per_avg$mean_ext_per))/sd(extraction_per_avg$mean_ext_per)
+
+per_extract<- extraction_per_avg$mean_ext_per
+per_extract <- setNames(per_extract,extraction_per_avg$species)
+
+per_extract_SE <- extraction_per_avg$sd_ext_per
+per_extract_SE <- setNames(per_extract_SE,extraction_per_avg$species)
+
+fitEvoModels_ext <- lapply(EvoModels,FUN = function(x) fitContinuous(inga.tree_rooted,per_extract,SE = per_extract_SE, model = x,bounds=list(alpha = c(min = 0, max = exp(20)), slope = c(min = -100, max = 10000), drift = c(min = -1000, max = 1000) ),control = list(niter = iterations),ncores = cores))
+
+AICs_ext <- sapply(fitEvoModels_ext, FUN = function(x) x$opt$aicc)
+
+names(AICs_ext) <- EvoModels
+
+(AICtable_ext <- aicw(AICs_ext))
+
+BM_model_ext = fitEvoModels_ext[[1]]
+OU_model_ext = fitEvoModels_ext[[2]]
+white_model_ext = fitEvoModels_ext[[3]]
+#mean_trend_model_ext = fitEvoModels_ext[[4]]
+
+mean_all <- mean(per_extract)
+
+AICtable_ext$lnL <- c(BM_model_ext$opt$lnL,OU_model_ext$opt$lnL,white_model_ext$opt$lnL)
+AICtable_ext$sigsq <- round(c(BM_model_ext$opt$sigsq,OU_model_ext$opt$sigsq,white_model_ext$opt$sigsq),3)
+AICtable_ext$alpha <- round(c(NA,OU_model_ext$opt$alpha,NA),3)
+AICtable_ext$p_val <- sapply(1:length(fitEvoModels_ext), 
+               FUN = function(x){
+                 A<-fitEvoModels_ext[[1]]$opt$lnL
+                 B<-fitEvoModels_ext[[x]]$opt$lnL
+                 teststat <- -2 * (as.numeric(A)-as.numeric(B))
+                 p.val <- pchisq(teststat, df = 1, lower.tail = FALSE)
+                 return(p.val)})
+AICtable_ext$z0 <- c(BM_model_ext$opt$z0,OU_model_ext$opt$z0,white_model_ext$opt$z0)
+AICtable_ext$delta_from_root <- c(BM_model_ext$opt$z0-mean_all,OU_model_ext$opt$z0-mean_all,white_model_ext$opt$z0-mean_all)
+AICtable_ext[order(AICtable_ext$delta),]
+write.csv(AICtable_ext[order(AICtable_ext$delta),],here("./results/phyl_model_comparison_ext_percent.csv"))
+
+
+ancestral_bm <- anc.ML(inga.tree_rooted,x = per_extract,model = "BM")
+#ancestral_bm
+ancestral_OU <- anc.ML(inga.tree_rooted,x = per_extract,model = "OU")
+#ancestral_OU
+
+Node_value_estimates <- data.frame(node = row.names(data.frame(ancestral_bm$ace)), bm_estimate = data.frame(ancestral_bm$ace), OU_estimate = data.frame(ancestral_OU$ace))
+
+node_age <- data.frame(dist.nodes(inga.tree_rooted)[99,])
+Node_age_value_estimates <- merge(Node_value_estimates,node_age, by.x= "node", by.y = 0)
+names(Node_age_value_estimates) <- c("node","bm_estimate","OU_estimate","node_age")
+plot(Node_age_value_estimates$bm_estimate ~ Node_age_value_estimates$node_age) | abline(lm(Node_age_value_estimates$bm_estimate ~ Node_age_value_estimates$node_age), col = "red") | abline(lm(Node_age_value_estimates$OU_estimate ~ Node_age_value_estimates$node_age), col = "blue")
+
+
+```
+
+The best model for the data was the OU model. Mean treand was not significant.
+
+```{r , echo=T}
+#ncomps_species$standardized <- (ncomps_species$mean_ncomps - mean(ncomps_species$mean_ncomps))/sd(ncomps_species$mean_ncomps)
+
+ncomps<- ncomps_species$mean_ncomps
+ncomps <- setNames(ncomps,ncomps_species$species)
+
+obj<-contMap(inga.tree_rooted,ncomps,plot=F)
+plot(obj)
+
+```
+```{r}
+phylosig(inga.tree_rooted,ncomps,test=TRUE)
+```
+
+K = 1 means that relatives resemble one another as much as we should expect under BM; **K < 1 means that there is less “phylogenetic signal” than expected under BM**, while K > 1 means that there is more. A significant p-value returned from phylosig tells you that there is significant phylogenetic signal - that is, close relatives are more similar than random pairs of species
+
+```{r}
+ncomps<- ncomps_species$mean_ncomps
+ncomps <- setNames(ncomps,ncomps_species$species)
+
+ncomps_SE <- ncomps_species$sd_ncomps
+ncomps_SE  <- setNames(ncomps_SE,ncomps_species$species)
+
+
+fitEvoModels_ncomps <- lapply(EvoModels,FUN = function(x) fitContinuous(inga.tree_rooted,ncomps,SE = ncomps_SE, model = x,bounds=list(alpha = c(min = 0, max = exp(20)), slope = c(min = -100, max = 10000), drift = c(min = -1000, max = 1000) ),control = list(niter = iterations),ncores = cores))
+
+AICs_ncomps <- sapply(fitEvoModels_ncomps, FUN = function(x) x$opt$aicc)
+
+names(AICs_ncomps) <- EvoModels
+
+(AICtable_ncomps <- aicw(AICs_ncomps))
+
+BM_model_ncomps = fitEvoModels_ncomps[[1]]
+OU_model_ncomps = fitEvoModels_ncomps[[2]]
+white_model_ncomps = fitEvoModels_ncomps[[3]]
+#mean_trend_model_ncomps = fitEvoModels_ncomps[[4]]
+
+mean_all <- mean(ncomps)
+
+AICtable_ncomps$lnL <- c(BM_model_ncomps$opt$lnL,OU_model_ncomps$opt$lnL,white_model_ncomps$opt$lnL)
+AICtable_ncomps$sigsq <- round(c(BM_model_ncomps$opt$sigsq,OU_model_ncomps$opt$sigsq,white_model_ncomps$opt$sigsq),3)
+AICtable_ncomps$alpha <- round(c(NA,OU_model_ncomps$opt$alpha,NA),3)
+AICtable_ncomps$p_val <- sapply(1:length(fitEvoModels_ncomps), 
+               FUN = function(x){
+                 A<-fitEvoModels_ncomps[[1]]$opt$lnL
+                 B<-fitEvoModels_ncomps[[x]]$opt$lnL
+                 teststat <- -2 * (as.numeric(A)-as.numeric(B))
+                 p.val <- pchisq(teststat, df = 1, lower.tail = FALSE)
+                 return(p.val)})
+AICtable_ncomps$z0 <- c(BM_model_ncomps$opt$z0,OU_model_ncomps$opt$z0,white_model_ncomps$opt$z0)
+AICtable_ncomps$delta_from_root <- c(BM_model_ncomps$opt$z0-mean_all,OU_model_ncomps$opt$z0-mean_all,white_model_ncomps$opt$z0-mean_all)
+AICtable_ncomps[order(AICtable_ncomps$delta),]
+write.csv(AICtable_ncomps[order(AICtable_ncomps$delta),],here("./results/phyl_model_comparison_ncomps.csv"))
+
+
+ancestral_bm_ncomps <- anc.ML(inga.tree_rooted,x = ncomps,model = "BM")
+#ancestral_bm
+ancestral_OU_ncomps <- anc.ML(inga.tree_rooted,x = ncomps,model = "OU")
+#ancestral_OU
+
+Node_value_estimates_ncomps <- data.frame(node = row.names(data.frame(ancestral_bm_ncomps$ace)), bm_estimate = data.frame(ancestral_bm_ncomps$ace), OU_estimate = data.frame(ancestral_OU_ncomps$ace))
+
+node_age <- data.frame(dist.nodes(inga.tree_rooted)[99,])
+Node_age_value_estimates_ncomps <- merge(Node_value_estimates_ncomps,node_age, by.x= "node", by.y = 0)
+names(Node_age_value_estimates_ncomps) <- c("node","bm_estimate","OU_estimate","node_age")
+plot(Node_age_value_estimates_ncomps$bm_estimate ~ Node_age_value_estimates_ncomps$node_age) | abline(lm(Node_age_value_estimates_ncomps$bm_estimate ~ Node_age_value_estimates_ncomps$node_age), col = "red") | abline(lm(Node_age_value_estimates_ncomps$OU_estimate ~ Node_age_value_estimates_ncomps$node_age), col = "blue")
+
+
+```
+
+
+The best model was the OU model. Mean trend was the worst and not significant
+
+```{r , echo=T}
+#c)  Phyt diversity
+
+#pht_div_2_avg$standardized <- (pht_div_2_avg$mean_phyt_div - mean(pht_div_2_avg$mean_phyt_div))/sd(pht_div_2_avg$mean_phyt_div)
+
+phyt_div<- pht_div_2_avg$mean_phyt_div
+phyt_div <- setNames(phyt_div,pht_div_2_avg$Species)
+
+phyt_div_SE <- pht_div_2_avg$sd_phyt_div
+phyt_div_SE <- setNames(pht_div_phyl_SE,pht_div_2_avg$Species)
+
+obj<-contMap(inga.tree_rooted,phyt_div,plot=F)
+plot(obj)
+```
+```{r}
+phylosig(inga.tree_rooted,phyt_div,test=TRUE)
+```
+
+```{r}
+
+
+fitEvoModels_phyt_div <- lapply(EvoModels,FUN = function(x) fitContinuous(inga.tree_rooted,phyt_div,SE = phyt_div_SE, model = x,bounds=list(alpha = c(min = 0, max = exp(20)), slope = c(min = -100, max = 10000), drift = c(min = -1000, max = 1000) ),control = list(niter = iterations),ncores = cores))
+
+AICs_phyt_div <- sapply(fitEvoModels_phyt_div, FUN = function(x) x$opt$aicc)
+
+names(AICs_phyt_div) <- EvoModels
+
+(AICtable_phyt_div <- aicw(AICs_phyt_div))
+
+BM_model_phyt_div = fitEvoModels_phyt_div[[1]]
+OU_model_phyt_div = fitEvoModels_phyt_div[[2]]
+white_model_phyt_div = fitEvoModels_phyt_div[[3]]
+#mean_trend_model_phyt_div = fitEvoModels_phyt_div[[4]]
+
+mean_all <- mean(phyt_div)
+
+AICtable_phyt_div$lnL <- c(BM_model_phyt_div$opt$lnL,OU_model_phyt_div$opt$lnL,white_model_phyt_div$opt$lnL)
+AICtable_phyt_div$sigsq <- round(c(BM_model_phyt_div$opt$sigsq,OU_model_phyt_div$opt$sigsq,white_model_phyt_div$opt$sigsq),3)
+AICtable_phyt_div$alpha <- round(c(NA,OU_model_phyt_div$opt$alpha,NA),3)
+AICtable_phyt_div$p_val <- sapply(1:length(fitEvoModels_phyt_div), 
+               FUN = function(x){
+                 A<-fitEvoModels_phyt_div[[1]]$opt$lnL
+                 B<-fitEvoModels_phyt_div[[x]]$opt$lnL
+                 teststat <- -2 * (as.numeric(A)-as.numeric(B))
+                 p.val <- pchisq(teststat, df = 1, lower.tail = FALSE)
+                 return(p.val)})
+AICtable_phyt_div$z0 <- c(BM_model_phyt_div$opt$z0,OU_model_phyt_div$opt$z0,white_model_phyt_div$opt$z0)
+AICtable_phyt_div$delta_from_root <- c(BM_model_phyt_div$opt$z0-mean_all,OU_model_phyt_div$opt$z0-mean_all,white_model_phyt_div$opt$z0-mean_all)
+AICtable_phyt_div[order(AICtable_phyt_div$delta),]
+write.csv(AICtable_phyt_div[order(AICtable_phyt_div$delta),],here("./results/phyl_model_comparison_phyt_div.csv"))
+
+
+ancestral_bm_phyt_div <- anc.ML(inga.tree_rooted,x = phyt_div,model = "BM")
+#ancestral_bm
+ancestral_OU_phyt_div <- anc.ML(inga.tree_rooted,x = phyt_div,model = "OU")
+#ancestral_OU
+
+Node_value_estimates_phyt_div <- data.frame(node = row.names(data.frame(ancestral_bm_phyt_div$ace)), bm_estimate = data.frame(ancestral_bm_phyt_div$ace), OU_estimate = data.frame(ancestral_OU_phyt_div$ace))
+
+node_age <- data.frame(dist.nodes(inga.tree_rooted)[99,])
+Node_age_value_estimates_phyt_div <- merge(Node_value_estimates_phyt_div,node_age, by.x= "node", by.y = 0)
+names(Node_age_value_estimates_phyt_div) <- c("node","bm_estimate","OU_estimate","node_age")
+plot(Node_age_value_estimates_phyt_div$bm_estimate ~ Node_age_value_estimates_phyt_div$node_age) | abline(lm(Node_age_value_estimates_phyt_div$bm_estimate ~ Node_age_value_estimates_phyt_div$node_age), col = "red") | abline(lm(Node_age_value_estimates_phyt_div$OU_estimate ~ Node_age_value_estimates_phyt_div$node_age), col = "blue")
+
+
+```
+
+Paiwise graph
+```{r}
+
+names(d1) <- c("species","ncomps","ncomps_min","ncomps_max")
+names(d2) <- c("species","ext_per","ext_per_min","ext_per_max")
+names(d3) <- c("species","phyt_div","phyt_div_min","phyt_div_max")
+all_traits <- merge(d1,d2, by = "species")
+all_traits <- merge(all_traits,d3, by = "species")
+
+all_traits1 <- all_traits[match(all_traits$species,inga.tree_rooted$tip.label),]
+all_traits1[is.na(all_traits1)] <- 0 
+
+fit1 <- phylolm(per_extract~ncomps, phy=inga.tree_rooted)
+summary(fit1)
+plot(all_traits$ncomps,all_traits$ext_per,xlab="Number of compounds",ylab="Chemical defense investment (%DW)",abline(fit1, col = "red"))
+
+fit2 <- phylolm(phyt_div~ncomps, phy=inga.tree_rooted)
+summary(fit2)
+plot(all_traits$ncomps,all_traits$phyt_div,xlab="Number of compounds",ylab="Phytochemical diversity",abline(fit2, col = "red"))
+
+fit3 <- phylolm(phyt_div~per_extract, phy=inga.tree_rooted)
+summary(fit3)
+plot(all_traits$ext_per,all_traits$phyt_div,xlab="Chemical defense investment (%DW)",ylab="Phytochemical Diversity",abline(fit3, col = "red"))
+
+cor1 <- cor(all_traits$ncomps,all_traits$ext_per)
+cor2 <- cor(all_traits$ncomps,all_traits$phyt_div)
+cor3 <- cor(all_traits$ext_per,all_traits$phyt_div)
+
+#library("GGally")
+#ggpairs(all_traits[,c("ncomps","ext_per","phyt_div")],)
+
+```
+
+```{r}
+```
+
+

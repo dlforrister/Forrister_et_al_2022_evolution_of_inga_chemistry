@@ -1,0 +1,411 @@
+---
+title: "Figure S2 Major Compound Classes and Figure 4B SEM Model"
+author: "Dale Forrister"
+date: "2/3/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+if (!require(here)) install.packages('here')
+library(here)
+if (!require(ape)) install.packages('ape')
+library(ape)
+if (!require(phangorn)) install.packages('phangorn')
+library(phangorn)
+if (!require(nlme)) install.packages('nlme')
+library(nlme)
+if (!require(geiger)) install.packages('geiger')
+library(geiger)
+if (!require(phytools)) install.packages('phytools')
+library(phytools)
+if (!require(data.table)) install.packages('data.table')
+library(data.table)
+if (!require(vegan)) install.packages('vegan')
+library(vegan)
+if (!require(tidyr)) install.packages('tidyr')
+library(tidyr)
+
+if (!require(ggplot2)) install.packages('ggplot2')
+library(ggplot2)
+if (!require(ggstance)) install.packages('ggstance')
+library(ggstance)
+if (!require(ggtree)) {BiocManager::install("ggtree")}
+library(ggtree)
+if (!require(piecewiseSEM)) install.packages('piecewiseSEM')
+library(piecewiseSEM)
+
+here::here()
+
+```
+First read in phylogeny.
+
+This is a species level phylogney meaning all accessions collected at multiple sites have been combined into a single tip for all sites. 
+
+We have 98 species in the phylogeny and it has to be rooted with the Zygia outgroup
+
+```{r}
+inga.tree_rooted <-read.tree(here("data","Inga_Astralconstrained_datedTreePL_sptree_FINAL_Match_Utl.tre"))
+
+
+plot(inga.tree_rooted,no.margin=T,edge.width=2,cex = 0.5, align.tip.label= T)
+
+```
+
+Next, we load in chemistry dataset. These include:
+
+1) sampsByCompounds = matrix contain expression of each compound in each sample. 
+2) pairwise.comps.all = pairwise matrix with cosine similarities between compounds. This is produced by GNPS.
+3) pairwise.comps.all_dist = Same thing but converted to distance matrix (1-similarity)
+4) phy_code is a key for linking sample names to the phylogeny tip names. 
+
+```{r,echo=FALSE}
+source(here("./code/0_matching_sampsBycomps_and_pairwise.R"))
+sampsByCompounds_pres_abs <- (sampsByCompounds>0)*1
+```
+
+Next, we group all annotated compounds into major compound classes
+```{r}
+negative_comps <- read.csv(here("./data/Negative_Mode_pathway_comps.csv"))
+
+negative_comps_1 <- negative_comps[,c("number.pathway","Major_Group","Group","cluster.index")]
+
+tyr_deriv <- read.csv(here("./data/tyr_dopa_gallates_sampcomps.csv"))
+
+names(tyr_deriv)<- c("Species_Code","c7","c8","c9")
+tyr_deriv_1 <- merge(tyr_deriv,phy_code[,c("Species_Code","Species")], by = "Species_Code")
+
+tyr_deriv_2 <- setDT(tyr_deriv_1)[,.(c7 = sum(c7), c8 = sum(c8),c9 = sum(c9)),by="Species"]
+
+
+sampsByCompounds_1 <- merge(sampsByCompounds,tyr_deriv_2, by.x= 0,by.y = "Species",all.x=T)
+row.names(sampsByCompounds_1) <- sampsByCompounds_1$Row.names
+sampsByCompounds_1 <- sampsByCompounds_1[,-1]
+
+#We standardize by the total TIC in each sample so that values represent the percent of TIC invested in each compound class.
+sampsByCompounds_stand <- decostand(sampsByCompounds_1,"total",MARGIN = 1)
+
+pathway_abundance_ind_comps <- data.frame()
+for(n in unique(negative_comps_1$number.pathway)) {
+comps <- negative_comps_1[negative_comps_1$number.pathway == n,"cluster.index"]
+if(length(comps) == 1) {
+pathway_abundance_ind_comps <- rbind(pathway_abundance_ind_comps,data.frame(species = row.names(sampsByCompounds_stand), abundance = sampsByCompounds_stand[,as.character(comps)],number.pathway = n))}
+if(length(comps) > 1) {
+pathway_abundance_ind_comps <- rbind(pathway_abundance_ind_comps,data.frame(species = row.names(sampsByCompounds_stand), abundance = rowSums(sampsByCompounds_stand[,names(sampsByCompounds_stand) %in% comps]),number.pathway = n))}
+}
+
+pathway_abundance_ind_comps_wide <- spread(pathway_abundance_ind_comps,key = number.pathway,value = abundance,fill = 0)
+names(pathway_abundance_ind_comps_wide)[2:ncol(pathway_abundance_ind_comps_wide)] <- paste("c",names(pathway_abundance_ind_comps_wide)[2:ncol(pathway_abundance_ind_comps_wide)],sep="")
+
+tyrosine_percent <- read.csv(here("./data/tyrosine_percent_2020_09_14.csv"))
+names(tyrosine_percent) <- c("Species_Code","c4")
+tyrosine_percent_1 <- merge(tyrosine_percent,phy_code[,c("Species_Code","Species")], by = "Species_Code")
+
+tyrosine_percent_2 <- setDT(tyrosine_percent_1)[,.(c4 = sum(c4)),by="Species"]
+tyrosine_percent_2$c4 <- tyrosine_percent_2$c4/100
+
+tyrosine_percent_2[tyrosine_percent_2$Species == "sertulifera",]
+pathway_abundance_ind_comps_wide_1 <- merge(pathway_abundance_ind_comps_wide,tyrosine_percent_2, by.x= "species",by.y = "Species",all.x=T)
+
+pathway_abundance_ind_comps_wide_2 <- merge(pathway_abundance_ind_comps_wide_1,sampsByCompounds_stand[,c("c7","c8","c9")], by.x= "species",by.y = 0,all.x=T)
+
+pathway_abundance_ind_comps_wide_2$c4[is.na(pathway_abundance_ind_comps_wide_2$c4)] <- 0
+
+pathway_abundance_ind_comps_long <- gather(pathway_abundance_ind_comps_wide_2,compound,value,c1:c9)
+
+comps_key <- rbind(negative_comps_1,data.frame(number.pathway = c("4","7","8","9"), Major_Group = c("Tyrosine",rep("Tyrosin_and_related_Depsides",3)),Group = c("Tyrosine","Tyrosine_Depsides","Dopa_Despides","Tyramine_Depside"), cluster.index = NA)) 
+
+comps_key <- unique(comps_key[,c("number.pathway","Major_Group","Group")])
+
+comps_key$number.pathway <- paste("c",comps_key$number.pathway,sep="")
+
+pathway_abundance_ind_comps_long_1 <- merge(pathway_abundance_ind_comps_long,comps_key,by.x= "compound",by.y="number.pathway")
+
+ 
+saps <- read.csv(here("./data/00_Cluster_index_by_saponans_V3_10_24.csv"))
+
+saps_match <- saps[saps$cluster.index %in% names(sampsByCompounds_stand),]
+
+saps_compounds <- saps_match$cluster.index[saps_match$Is_Saponin == 1]
+
+saps_df <- data.frame( compound = "saponins", species = row.names(sampsByCompounds_stand), value = rowSums(sampsByCompounds_stand[,as.character(saps_compounds)]), Major_Group = "Saponins", Group = "saponins")
+
+pathway_abundance_ind_comps_long_3 <- rbind(pathway_abundance_ind_comps_long_1,saps_df)
+
+pathway_abundance_ind_comps_long_3[order(pathway_abundance_ind_comps_long_3$value,decreasing = T),]
+
+pathway_abundance_compound <- spread(setDT(pathway_abundance_ind_comps_long_3)[,.(abundance = sum(value)),by= c("species","compound")],key = compound,value = abundance,fill = 0)
+
+pathway_abundance_compound_1 <- pathway_abundance_compound[,2:ncol(pathway_abundance_compound)]
+row.names(pathway_abundance_compound_1) <- pathway_abundance_compound$species
+
+pathway_abundance_compound_1
+```
+The above matrix contains the abundace of each compound in each species listed in Figure 4A
+
+Next, we group these compounds into the major groups we seek to test for correlations with.
+
+```{r}
+pathway_abundance_group <- spread(setDT(pathway_abundance_ind_comps_long_3)[,.(abundance = sum(value)),by= c("species","Group")],key = Group,value = abundance,fill = 0)
+
+pathway_abundance_major_group <- spread(setDT(pathway_abundance_ind_comps_long_3)[,.(abundance = sum(value)),by= c("species","Major_Group")],key = Major_Group,value = abundance,fill = 0)
+
+```
+
+Finally, we combine major compound groups into major branches of the biosynthetic pathway found in Figure 4B.
+
+```{r}
+
+
+
+
+
+pathway_abundance_compound <- spread(setDT(pathway_abundance_ind_comps_long_3)[,.(abundance = sum(value)),by= c("species","compound")],key = compound,value = abundance,fill = 0)
+names(pathway_abundance_major_group)
+
+pathway_abundance_compound_flav <- pathway_abundance_compound[,c("species","c13","c14")]
+pathway_abundance_compound_flav$center <- rowSums(pathway_abundance_compound[,c("c15","c18","c16","c29","c35")])
+
+
+pathway_abundance_compound_flav$left <- rowSums(pathway_abundance_compound[,c("c19","c21","c22","c20","c27","c28","c33","c34")])
+
+pathway_abundance_compound_flav$right <- rowSums(pathway_abundance_compound[,c("c25","c24","c26","c31","c32","c36","c37")])
+pathway_abundance_compound_flav$mixed_poly <- rowSums(pathway_abundance_compound[,c("c38","c39")])
+
+pathway_abundance_major_group$Arogenate <- 0
+pathway_abundance_major_group$Arogenate <- jitter(pathway_abundance_major_group$Arogenate)
+
+pathway_abundance_compound_all <- pathway_abundance_major_group[,c("species","Saponins","Arogenate")]
+
+pathway_abundance_compound_all$Tyrosin_and_related_Depsides <- rowSums(data.frame(pathway_abundance_major_group$Tyrosin_and_related_Depsides,pathway_abundance_major_group$Tyrosine))
+
+pathway_abundance_compound_all$Quinic_acid_galates <- rowSums(data.frame(pathway_abundance_major_group$Precursors,pathway_abundance_major_group$Quinic_acid_galates))
+
+pathway_abundance_compound_all <- cbind(pathway_abundance_compound_all,pathway_abundance_compound_flav[,2:7])
+
+pathway_abundance_compound_all
+```
+Figure S2
+Next we generate a facet plot to display these data. 
+```{r}
+p <- ggtree(inga.tree_rooted) 
+d0 <- data.frame(id = pathway_abundance_compound_all$species, value = rowSums(pathway_abundance_compound_all[,c(2,4:11)]>0.01))
+
+p0 <- facet_plot(p, panel= "Number of Classes", data=d0, geom= geom_barh, aes(x= value), color='black',fill = 'black',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,6), "Number of Classes")
+
+
+d1 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$Quinic_acid_galates)
+
+p2 <- facet_plot(p0, panel= "Quinic_acid_galates", data=d1, geom= geom_barh, aes(x= value), color='Yellow',fill = 'Yellow',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,0.2), "Quinic_acid_galates")
+
+d2 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$Tyrosin_and_related_Depsides)
+
+p3 <- facet_plot(p2, panel= "Tyrosin_and_related_Depsides", data=d2, geom= geom_barh, aes(x= value), color='orange',fill = 'orange',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,0.8), "Tyrosin_and_related_Depsides")
+
+d4 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$c14)
+
+p5 <- facet_plot(p3, panel= "Flavones", data=d4, geom= geom_barh, aes(x= value), color='red',fill = 'red',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,0.2), "Flavones")
+
+d5 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$center)
+
+p6 <- facet_plot(p5, panel= "Flavanoid\nCenter", data=d5, geom= geom_barh, aes(x= value), color='blue',fill = 'blue',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15))  + xlim_expand(c(0,0.2), "Flavanoid\nCenter")
+
+d6 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$left)
+
+p7 <- facet_plot(p6, panel= "Flavanoid\nLeft", data=d6, geom= geom_barh, aes(x= value), color='blue',fill = 'blue',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,0.2), "Flavanoid\nLeft")
+
+d7 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$right)
+
+p8 <- facet_plot(p7, panel= "Flavanoid\nRight", data=d7, geom= geom_barh, aes(x= value), color='blue',fill = 'blue',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,0.2), "Flavanoid\nRight")
+
+d8 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$mixed_poly)
+
+p9 <- facet_plot(p8, panel= "Mixed\nPolymers", data=d8, geom= geom_barh, aes(x= value), color='light blue',fill = 'light blue',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,0.2), "Mixed\nPolymers")
+
+d9 <- data.frame(id = pathway_abundance_compound_all$species, value = pathway_abundance_compound_all$Saponins)
+
+p11 <- facet_plot(p9, panel= "Saponins", data=d9, geom= geom_barh, aes(x= value), color='purple',fill = 'purple',stat='identity' )  + theme_tree2() + theme(legend.position = "none") + theme(text = element_text(size=15)) + xlim_expand(c(0,0.8), "Saponins")
+
+ggsave(p11,path = here("./results/"),filename = "Figure_S2_SEM_Model_Barplot.pdf",dpi = 600,width = 20,height = 12)
+p11
+```
+
+First run non-peicewise for each of the following to determine if they should be brownian motion or OU models of evolution...
+
+for each of the above models run the following lines to compare the goodness of fit of a nonphylogenetic, brownian motion and OU model.
+
+```{r}
+dat <- pathway_abundance_compound_all
+#Arogenate ~ Quinic_acid_galates
+#Tyrosin_and_related_Depsides ~ Arogenate
+#c13 ~ Arogenate
+#c14 ~ c13
+#center ~ c13
+#right ~ center
+#left ~ center
+#mixed_poly ~ center + left + right
+#Saponins~Quinic_acid_galates +  Arogenate +  Tyrosin_and_related_Depsides + c13 + c14 + center+right+left+mixed_poly
+
+
+model <- mixed_poly ~ center + left + right
+
+#best model
+
+glsResult<-gls(model, data=dat, method="ML")
+pglsResult<-gls(model, cor=cbm<-corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML")
+pglsResultOU<-gls(model, cor=corMartins(1, phy=inga.tree_rooted, form = ~species), data=dat, method="ML")
+anova(glsResult,pglsResult, pglsResultOU)
+
+
+```
+From these resuls we choose the model structure that fits our data best.
+
+The best models for each class are listed below:
+
+gls(Arogenate ~ Quinic_acid_galates, cor=corMartins(1, phy=inga.tree_rooted, form = ~species), data=dat, method="ML")
+gls(Tyrosin_and_related_Depsides ~ Arogenate, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+gls(c13 ~ Arogenate, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+gls(c14 ~ c13, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+gls(center ~ c13, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+gls(right ~ center, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+gls(left ~ center, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+gls(mixed_poly ~ center + left + right, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+gls(Saponins~Quinic_acid_galates +  Arogenate +  Tyrosin_and_related_Depsides + c13 + c14 + center+right+left+mixed_poly, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"))
+
+gls(Saponins~Quinic_acid_galates + Precursors + Arogenate + Tyrosine + Tyrosin_and_related_Depsides + c13 + c14 + center+right+left+mixed_poly, data=dat, correlation=bm))
+
+
+Next, we build and compre Piecewise SEM model. The idea behind this is to incorporate the nonindependence between predictor variables that we would expect because compound classes are biosynthetically related. Thus, we start by coding for all the direct relationships we would expect based on the biosynthetic pathway in Figure 4A.
+```{r}
+model_comps_all <- psem(gls(Arogenate ~ Quinic_acid_galates, cor=corMartins(1, phy=inga.tree_rooted, form = ~species), data=dat, method="ML"),
+                        gls(Tyrosin_and_related_Depsides ~ Arogenate, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(c13 ~ Arogenate, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(c14 ~ c13, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(center ~ c13, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(right ~ center, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(left ~ center, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(mixed_poly ~ center + left + right, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(Saponins~Quinic_acid_galates +  Arogenate +  Tyrosin_and_related_Depsides + c13 + c14 + center+right+left+mixed_poly, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"))
+
+
+summary(model_comps_all)                     
+```
+Now we add in all the indirect effects that were significant based on the Tests of directed separation.
+```{r}
+model_comps_all_1 <- psem(gls(Arogenate ~ Quinic_acid_galates, cor=corMartins(1, phy=inga.tree_rooted, form = ~species), data=dat, method="ML"),
+                        gls(Tyrosin_and_related_Depsides ~ Arogenate, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(c13 ~ Arogenate + Tyrosin_and_related_Depsides, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(c14 ~ c13, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(center ~ c13, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(right ~ center + Quinic_acid_galates, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(left ~ center + right + c14, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(mixed_poly ~ center + left + right, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(Saponins~Quinic_acid_galates +  Arogenate +  Tyrosin_and_related_Depsides + c13 + c14 + center+right+left+mixed_poly, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"))
+
+summary(model_comps_all_1) 
+```
+Lastly, we remove all of the non significant connections one at a time until we have the simplest model with only significant variables. 
+
+```{r}
+model_comps_all_2 <- psem(gls(c13 ~  Tyrosin_and_related_Depsides, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(right ~  Quinic_acid_galates, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(left ~  right, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(mixed_poly ~  left , cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"),
+                        gls(Saponins~ right+left, cor=corBrownian(1, inga.tree_rooted,form = ~species), data=dat, method="ML"))
+
+
+
+summary(model_comps_all_2) 
+```
+
+```{r}
+plot(model_comps_all_2)
+
+```
+
+Finally, we estimate Phylogenetic signal using Blomberg's K for each of these classes
+```{r}
+Quinic_acid_galates <- pathway_abundance_compound_all$Quinic_acid_galates
+Quinic_acid_galates <- setNames(Quinic_acid_galates,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,Quinic_acid_galates,plot=F)
+plot(obj)
+```
+```{r}
+phylosig(inga.tree_rooted,Quinic_acid_galates,test=TRUE) 
+```
+```{r}
+Tyrosin_and_related_Depsides<- pathway_abundance_compound_all$Tyrosin_and_related_Depsides
+Tyrosin_and_related_Depsides <- setNames(Tyrosin_and_related_Depsides,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,Tyrosin_and_related_Depsides,plot=F)
+plot(obj)
+```
+
+```{r}
+phylosig(inga.tree_rooted,Tyrosin_and_related_Depsides,test=TRUE) 
+```
+```{r}
+Flavones<- pathway_abundance_compound_all$c14
+Flavones <- setNames(Flavones,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,Flavones,plot=F)
+plot(obj)
+```
+
+```{r}
+phylosig(inga.tree_rooted,Flavones,test=TRUE) 
+```
+```{r}
+center<- pathway_abundance_compound_all$center
+center <- setNames(center,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,center,plot=F)
+plot(obj)
+```
+```{r}
+phylosig(inga.tree_rooted,center,test=TRUE) 
+```
+```{r}
+left<- pathway_abundance_compound_all$left
+left <- setNames(left,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,left,plot=F)
+plot(obj)
+```
+```{r}
+phylosig(inga.tree_rooted,left,test=TRUE) 
+
+```
+```{r}
+right<- pathway_abundance_compound_all$right
+right <- setNames(right,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,right,plot=F)
+plot(obj)
+```
+
+```{r}
+phylosig(inga.tree_rooted,right,test=TRUE) 
+
+```
+```{r}
+mixed_poly<- pathway_abundance_compound_all$mixed_poly
+mixed_poly <- setNames(mixed_poly,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,mixed_poly,plot=F)
+plot(obj)
+```
+```{r}
+phylosig(inga.tree_rooted,mixed_poly,test=TRUE) 
+
+```
+```{r}
+Saponins<- pathway_abundance_compound_all$Saponins
+Saponins <- setNames(Saponins,pathway_abundance_compound_all$species)
+
+obj<-contMap(inga.tree_rooted,Saponins,plot=F)
+plot(obj)
+```
+```{r}
+phylosig(inga.tree_rooted,Saponins,test=TRUE) 
+```
