@@ -29,6 +29,7 @@ setwd("K:/Lab_Map/git_repositories/Evolution_Of_Inga_Chemistry-master")
 
 ####### Load in mzrt from pickle object #######
 compound_feature_table <- read.csv("./data/C18/c18_comp_feat_pcid_mzrt_rtwindow.csv")
+
 # remove any features with signal (TIC) below 1000
 compound_feature_table_1 <- compound_feature_table[compound_feature_table$TIC > 1000,]
 # use PCID column to extract species for each row
